@@ -5,13 +5,13 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from stable_baselines3 import PPO
 import sys
-import torch # <-- ΝΕΟ!
+import torch 
 
 # --- ΒΗΜΑ 1: Ο "ΜΕΤΑΦΡΑΣΤΗΣ" (Vectorization) ---
-vectorizer = TfidfVectorizer(max_features=9) # 9 features, όπως είπαμε!
+vectorizer = TfidfVectorizer(max_features=9) 
 vectorizer.fit(["/wp-admin.php", "/vulnerabilities/sqli", "/healthz", "SELECT", "FROM", "script"])
 
-# --- ΒΗΜΑ 2: ΤΑ ΔΕΔΟΜΕΝΑ (Δύο διαφορετικές "λίμνες") ---
+# --- ΒΗΜΑ 2: ΤΑ ΔΕΔΟΜΕΝΑ 
 
 # Δεδομένα ΜΟΝΟ από το WAF (False Positives + Γνωστές Απειλές)
 FAKE_LOG_DB_WAF = [
@@ -28,16 +28,14 @@ FAKE_LOG_DB_HONEYPOT = [
 ]
 
 # --- ΒΗΜΑ 3: ΤΟ "ΠΕΡΙΒΑΛΛΟΝ" (Gym Environment) ---
-# (Ακριβώς το ίδιο WafEnv που φτιάξαμε στο rl_trainer.py)
 class WafEnv(gym.Env):
-    # (ΣΗΜΑΝΤΙΚΗ ΑΛΛΑΓΗ: Του δίνουμε τη "λίμνη" δεδομένων όταν φτιάχνεται)
     def __init__(self, db_source): 
         super(WafEnv, self).__init__()
         
         self.action_space = spaces.Discrete(3)
         self.observation_space = spaces.Box(low=0, high=1, shape=(9,), dtype=np.float32) # 9 features!
         
-        self.FAKE_LOG_DB = db_source # <--- Αυτή είναι η "λίμνη" του
+        self.FAKE_LOG_DB = db_source 
         
         self.max_steps = 1000 # Max steps *ανά γύρο*
         self.current_step = 0
@@ -94,13 +92,12 @@ class FlowerRLClient(fl.client.NumPyClient):
         self.model = PPO("MlpPolicy", self.env, verbose=0)
 
     def get_parameters(self, config):
-        # "Δώσε μου το 'μυαλό' σου" (τα weights του νευρωνικού δικτύου)
+        # (τα weights του νευρωνικού δικτύου)
         print(f"[Client {self.client_id}] Στέλνω το 'μυαλό' μου στον Server...")
         # (Αυτό μετατρέπει το Pytorch model σε λίστα που καταλαβαίνει το Flower)
         return [param.detach().cpu().numpy() for param in self.model.policy.parameters()]
 
     def set_parameters(self, parameters):
-        # "Πάρε το νέο, 'Super-μυαλό' από τον Server"
         print(f"[Client {self.client_id}] Πήρα νέο 'Super-μυαλό'!")
         # (Αυτό φορτώνει τη λίστα στο Pytorch model)
         params_dict = zip(self.model.policy.state_dict().keys(), parameters)
@@ -111,27 +108,26 @@ class FlowerRLClient(fl.client.NumPyClient):
         # "Ώρα για εκπαίδευση!"
         print(f"[Client {self.client_id}] Ξεκινάω τοπική εκπαίδευση (fit)...")
         
-        # 1. Πάρε το νέο "μυαλό" από τον server
+        # 1. Παίρνω το νέο "μυαλό" από τον server
         self.set_parameters(parameters)
         
-        # 2. Εκπαιδεύσου ΠΑΝΩ σε αυτό (π.χ. 1000 βήματα)
+        # 2. Εκπαιδεύσμαι πάνω σε αυτό 
         self.model.learn(total_timesteps=1000)
         
-        # 3. Στείλε το *νέο, βελτιωμένο* "μυαλό" σου πίσω
+        # 3. Στέλνω το *νέο, βελτιωμένο* "μυαλό" πίσω
         print(f"[Client {self.client_id}] Η εκπαίδευση τελείωσε.")
         return self.get_parameters(config={}), self.env.max_steps, {}
 
     def evaluate(self, parameters, config):
-        # (Απλά για να μη σκάσει, όπως και πριν)
         return 0.0, 1, {}
 
-# --- ΒΗΜΑ 5: ΞΕΚΙΝΑ ΤΟΝ CLIENT (v1.7) ---
+# --- ΒΗΜΑ 5: ΞΕΚΙΝΑΕΙ Ο CLIENT ---
 if __name__ == "__main__":
     
-    # Πάρε το ID (1 ή 2) από την εντολή
+    # Παίρνω το ID (1 ή 2) από την εντολή
     client_id = sys.argv[1] if len(sys.argv) > 1 else "1"
     
-    # Φτιάξε τον σωστό Client (WAF ή Honeypot)
+    # Φτιάχνω τον σωστό Client (WAF ή Honeypot)
     client = FlowerRLClient(client_id=client_id)
     
     print(f"Ξεκινάω τον Flower RL Client {client_id} (v1.7)...")
