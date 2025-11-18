@@ -1,0 +1,42 @@
+version: '3'
+
+services:
+  dvwa:
+    image: infoslack/dvwa
+    container_name: dvwa_target
+    networks:
+      - waf_network
+
+  waf_real:
+    image: owasp/modsecurity-crs:3.3.2-nginx
+    container_name: waf_instance1
+    ports:
+      - "8081:80"
+    volumes:
+      - ./waf_config:/etc/nginx/conf.d
+    environment:
+      - MODSEC_AUDIT_ENGINE=On
+      - MODSEC_RULE_ENGINE=On
+      - PORT=8001
+    networks:
+      - waf_network
+    depends_on:
+      - dvwa
+
+  waf_honeypot:
+    image: owasp/modsecurity-crs:3.3.2-nginx
+    container_name: waf_honeypot
+    ports:
+      - "8088:80"
+    volumes:
+      # ΣΥΝΔΕΣΗ ΦΑΚΕΛΟΥ ΜΕ ΣΧΕΤΙΚΗ ΔΙΑΔΡΟΜΗ
+      - ./honeypot_config:/etc/nginx/conf.d
+    environment:
+      - MODSEC_AUDIT_ENGINE=On
+      - PORT=8001
+    networks:
+      - waf_network
+
+networks:
+  waf_network:
+    driver: bridge
