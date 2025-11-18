@@ -1,4 +1,4 @@
-# 🛡️ Federated Reinforcement Learning WAF
+# 🛡️ Federated Reinforcement Learning WAF - DEMO v1.1
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue)
