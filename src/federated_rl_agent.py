@@ -15,7 +15,7 @@ import flwr as fl
 WAF_CONTAINER_NAME = "waf_instance1"
 HONEYPOT_CONTAINER_NAME = "waf_honeypot"
 
-# "Χέρια": Σύνδεση με το Docker για να γράφουμε κανόνες
+# Σύνδεση με το Docker για γράψιμο κανόνων
 client = docker.from_env()
 try:
     waf_container = client.containers.get(WAF_CONTAINER_NAME)
@@ -27,7 +27,7 @@ except docker.errors.NotFound:
 vectorizer = TfidfVectorizer(max_features=9) 
 vectorizer.fit(["/wp-admin.php", "/vulnerabilities/sqli", "/healthz", "SELECT", "FROM", "script"])
 
-# "Δεδομένα": Οι δύο "λίμνες"
+# "Mock βάσεις για λόγους δσκιμής"
 FAKE_LOG_DB_WAF = [
     {'uri': '/', 'ip': '1.1.1.1', 'source': 'WAF', 'messages': []},
     {'uri': '/healthz', 'ip': '1.1.1.2', 'source': 'WAF', 'messages': []},
@@ -40,7 +40,6 @@ FAKE_LOG_DB_HONEYPOT = [
 ]
 
 # --- ΒΗΜΑ 2: ΤΟ "ΠΕΡΙΒΑΛΛΟΝ" (Gym Env) ---
-# (Ακριβώς το ίδιο WafEnv που φτιάξαμε, δεν αλλάζει τίποτα)
 class WafEnv(gym.Env):
     def __init__(self, db_source): 
         super(WafEnv, self).__init__()
@@ -52,24 +51,19 @@ class WafEnv(gym.Env):
 
     def _get_observation(self, log_data):
 
-    # --- ΑΥΤΗ ΕΙΝΑΙ Η ΔΙΟΡΘΩΣΗ ---
-    # Ελέγχει αν το log είναι "αληθινό" (nested) ή "ψεύτικο" (flat)
-
         if 'transaction' in log_data:
-        # Είναι "ΑΛΗΘΙΝΟ" log από το Live Mode
+        # "ΑΛΗΘΙΝΟ" log από το Live Mode
             uri = log_data['transaction']['request']['uri']
         else:
-        # Είναι "ΨΕΥΤΙΚΟ" log από το FAKE_LOG_DB (Εκπαίδευση)
-            uri = log_data.get('uri', '/') # Χρησιμοποίησε .get() για ασφάλεια
-
-    # -----------------------------
+        # "ΨΕΥΤΙΚΟ" log από το FAKE_LOG_DB (Εκπαίδευση)
+            uri = log_data.get('uri', '/') 
 
         vector = vectorizer.transform([uri]).toarray().flatten()
         return vector
 
     def _get_reward(self, log_data, action):
-        uri = log_data.get('uri', '/') # Ασφάλεια
-        source = log_data.get('source', 'WAF') # Ασφάλεια
+        uri = log_data.get('uri', '/') 
+        source = log_data.get('source', 'WAF') 
 
         if uri == "/healthz" and (action == 1 or action == 2): return -100
         if source == 'HONEYPOT':
@@ -95,8 +89,7 @@ class WafEnv(gym.Env):
         log_data = self.FAKE_LOG_DB[np.random.randint(len(self.FAKE_LOG_DB))]
         return self._get_observation(log_data), {}
 
-# --- ΒΗΜΑ 3: Ο "LIVE" AGENT (Τα "Χέρια" και τα "Μάτια") ---
-# (Αυτές είναι οι λειτουργίες από το 'rl_agent.py')
+# --- ΒΗΜΑ 3: Ο "LIVE" AGENT 
 
 blocked_uris = set()
 blocked_ips = set()
@@ -151,14 +144,13 @@ def live_log_parser(container_name, model):
                     json_data['source'] = 'WAF' if container_name == WAF_CONTAINER_NAME else 'HONEYPOT'
                     print("\n" + "="*20 + f" LIVE LOG ΑΠΟ [{container_name}] " + "="*20)
                     
-                    # --- Η "Στιγμή της Αλήθειας" ---
-                    # 1. "Μετάφρασε" το log σε "εικόνα"
-                    observation = WafEnv(db_source=[])._get_observation(json_data) # (Hack: φτιάχνουμε ένα ψεύτικο env για να πάρουμε τη συνάρτηση)
+                    # 1. Μεταφράζω το log σε εικόνα
+                    observation = WafEnv(db_source=[])._get_observation(json_data) 
                     
-                    # 2. "Ρώτα" το "Super-Μυαλό" τι να κάνει
+                    # 2. Ρωτάω το "Super-Μυαλό" τι να κάνει
                     action, _states = model.predict(observation, deterministic=True)
                     
-                    # 3. "Δράσε" (Γράψε τον κανόνα!)
+                    # 3. Γράφω τον κανόνα!
                     apply_rule_to_waf(action, json_data)
                     
                 except json.JSONDecodeError:
@@ -166,7 +158,7 @@ def live_log_parser(container_name, model):
     except docker.errors.NotFound:
         print(f"[ERROR] Το 'live' container '{container_name}' δεν βρέθηκε!")
 
-# --- ΒΗΜΑ 4: Ο FLOWER CLIENT (που συνδυάζει τα πάντα) ---
+# --- ΒΗΜΑ 4: Ο FLOWER CLIENT 
 class FlowerRLClient(fl.client.NumPyClient):
     def __init__(self, client_id):
         self.client_id = client_id
@@ -203,10 +195,10 @@ class FlowerRLClient(fl.client.NumPyClient):
 # --- ΒΗΜΑ 5: ΤΟ ΤΕΛΙΚΟ ΠΡΟΓΡΑΜΜΑ ---
 if __name__ == "__main__":
     
-    # 1. Πάρε το ID (1 ή 2) από την εντολή
+    # 1. Παίρνω το ID (1 ή 2) από την εντολή
     client_id = sys.argv[1] if len(sys.argv) > 1 else "1"
     
-    # 2. Φτιάξε τον Client
+    # 2. Φτιάχνω τον Client
     client_object = FlowerRLClient(client_id=client_id)
     
     # --- ΦΑΣΗ 1: ΟΜΟΣΠΟΝΔΙΑ (ΕΚΠΑΙΔΕΥΣΗ) ---
@@ -226,10 +218,10 @@ if __name__ == "__main__":
     print(f"--- Χρησιμοποιώ το τελικό 'Super-Μυαλό' ---")
     print("="*50 + "\n")
     
-    # Πάρε το "Super-Μυαλό" που έμεινε από την εκπαίδευση
+    # Το "Super-Μυαλό" που έμεινε από την εκπαίδευση
     final_model = client_object.model 
     
-    # Διάλεξε ποιο log θα ακούει ο καθένας
+    # Διάλέγει ποιο log θα ακούει ο καθένας
     if client_id == "1":
         # Ο Agent 1 ακούει τον "πραγματικό" WAF
         target_container = WAF_CONTAINER_NAME
@@ -237,7 +229,7 @@ if __name__ == "__main__":
         # Ο Agent 2 ακούει την "παγίδα"
         target_container = HONEYPOT_CONTAINER_NAME
 
-    # Ξεκίνα τον "Live" listener και κράτα το script ζωντανό
+    # Ξεκινά τον "Live" listener και κρατά το script ζωντανό
     try:
         live_log_parser(target_container, final_model)
     except KeyboardInterrupt:
