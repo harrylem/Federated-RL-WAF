@@ -6,13 +6,11 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env # Τώρα θα το χρειαστούμε!
 
 # --- ΒΗΜΑ 1: Ο "ΜΕΤΑΦΡΑΣΤΗΣ" (Vectorization) ---
-# (Ο ίδιος ακριβώς Vectorizer με πριν)
 vectorizer = TfidfVectorizer(max_features=100)
 # Του "διδάσκουμε" κάποιες βασικές λέξεις-κλειδιά
 vectorizer.fit(["/wp-admin.php", "/vulnerabilities/sqli", "/healthz", "SELECT", "FROM", "script"])
 
 # --- Προσομοίωση των "Logs" μας ---
-# Θα φτιάξουμε μια ψεύτικη "λίμνη" από logs για γρήγορη εκπαίδευση
 FAKE_LOG_DB = [
     # "Αθώα" Logs (Πρέπει να τα αγνοήσει - Action 0)
     {'uri': '/', 'ip': '1.1.1.1', 'source': 'WAF', 'messages': []},
@@ -25,7 +23,6 @@ FAKE_LOG_DB = [
 ]
 
 # --- ΒΗΜΑ 2: ΤΟ "ΠΕΡΙΒΑΛΛΟΝ" (Gym Environment) ---
-# (Σχεδόν το ίδιο με πριν, αλλά τώρα είναι ένα *πραγματικό* Gym Env)
 class WafEnv(gym.Env):
     def __init__(self):
         super(WafEnv, self).__init__()
@@ -67,7 +64,7 @@ class WafEnv(gym.Env):
             if action == 1 or action == 2: # Block URI or IP
                 return 10
             if action == 0:
-                return 0 # ΟΚ, το έπιασε ήδη το ModSecurity
+                return 0 
 
         # 4. ΑΘΩΑ ΚΙΝΗΣΗ ΠΟΥ ΑΓΝΟΗΘΗΚΕ (Το καλύτερο σενάριο)
         if source == 'WAF' and not log_data['messages'] and action == 0:
@@ -76,35 +73,35 @@ class WafEnv(gym.Env):
         return -1 # Μικρή τιμωρία για άλλες λάθος αποφάσεις
 
     def step(self, action):
-        # 1. Πάρε ένα τυχαίο log από τη "λίμνη"
+        # 1. Τυχαίο log από τη "Βάση"
         log_data = FAKE_LOG_DB[np.random.randint(len(FAKE_LOG_DB))]
         
-        # 2. Πάρε την Ανταμοιβή (Reward) για τη δράση (action) που επέλεξε η AI
+        # 2. Παίρνει την ανταμοιβή (Reward) για τη δράση (action) που επέλεξε η AI
         reward = self._get_reward(log_data, action)
         
-        # 3. Εφάρμοσε τη Δράση (αν χρειάζεται)
+        # 3. Εφαρμόζει τη δράση 
         if action == 1:
             self.blocked_uris.add(log_data['uri'])
         elif action == 2:
             self.blocked_ips.add(log_data['ip'])
 
-        # 4. Πάρε την επόμενη "παρατήρηση" (observation)
+        # 4. Παίρνει την επόμενη παρατήρηση 
         observation = self._get_observation(log_data)
         
         self.current_step += 1
         
-        # 5. Έλεγξε αν το "παιχνίδι" τελείωσε
+        # 5. Ελέγχει αν το παιχνίδι τελείωσε
         done = (self.current_step >= self.max_steps)
         
-        # Το step *πρέπει* να επιστρέφει αυτά τα 5 πράγματα
+        # Το step πρέπει να επιστρέφει αυτά τα παρακάτω 
         return observation, reward, done, False, {}
 
     def reset(self, seed=None):
-        # Ξεκίνα από την αρχή
+        # Ξεκινά από την αρχή
         self.current_step = 0
         self.blocked_uris = set()
         self.blocked_ips = set()
-        # Επέστρεψε την πρώτη "εικόνα" (ένα τυχαίο log)
+        # Επιστρέφει την "πρώτη εικόνα" (ένα τυχαίο log)
         log_data = FAKE_LOG_DB[np.random.randint(len(FAKE_LOG_DB))]
         return self._get_observation(log_data), {}
 
@@ -112,40 +109,34 @@ class WafEnv(gym.Env):
 if __name__ == "__main__":
     # Ο φάκελος όπου θα σωθούν τα γραφήματα
     TENSORBOARD_LOG_DIR = "./waf_tensorboard_logs/"
-    # 1. Φτιάξε το "Γυμναστήριο"
     env = WafEnv()
     
-    # (Προαιρετικό) Έλεγξε αν το "Γυμναστήριο" είναι σωστό
-    # check_env(env) 
-    
-    # 2. Φέρε τον Αλγόριθμο AI (PPO)
-    # "MlpPolicy" = Ένα απλό νευρωνικό δίκτυο
+    # 2. Φορτώνω τον Αλγόριθμο AI (PPO)
     print("="*30)
     print("ΞΕΚΙΝΑΩ ΕΚΠΑΙΔΕΥΣΗ (με logging στο TensorBoard)...")
     print("="*30)
     
     model = PPO("MlpPolicy", env, verbose=1, tensorboard_log=TENSORBOARD_LOG_DIR)
     
-    # 3. ΕΚΠΑΙΔΕΥΣΕ ΤΟ! (π.χ., για 10,000 "βήματα")
+    # 3. ΕΚΠΑΙΔΕΥΣΗ (π.χ., για 10,000 "βήματα")
     model.learn(total_timesteps=10000, tb_log_name="PPO_Agent_v1")
     
     print("="*30)
     print("Η ΕΚΠΑΙΔΕΥΣΗ ΤΕΛΕΙΩΣΕ!")
     print("="*30)
     
-    # 4. Αποθήκευσε το "Μυαλό"
+    # 4. Αποθήκευση του "Μυαλού"
     model.save("waf_rl_agent")
     
     print("Το εκπαιδευμένο μοντέλο αποθηκεύτηκε ως 'waf_rl_agent.zip'")
-    
-    # --- Ας δούμε τι έμαθε ---
+    # 5. Δοκιμή!!!
     print("\n--- Δοκιμή του εκπαιδευμένου Agent ---")
     obs, _ = env.reset()
     for _ in range(10): # Δοκίμασέ τον 10 φορές
         # Τώρα η απόφαση (action) ΔΕΝ είναι τυχαία!
         action, _states = model.predict(obs, deterministic=True)
         
-        # Δες τι αποφάσισε
+        # Απόφαση
         if action == 1:
             print("  [AI] ΑΠΟΦΑΣΗ: Μπλοκάρισμα URI")
         elif action == 2:
