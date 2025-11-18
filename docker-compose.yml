@@ -29,7 +29,6 @@ services:
     ports:
       - "8088:80"
     volumes:
-      # ΣΥΝΔΕΣΗ ΦΑΚΕΛΟΥ ΜΕ ΣΧΕΤΙΚΗ ΔΙΑΔΡΟΜΗ
       - ./honeypot_config:/etc/nginx/conf.d
     environment:
       - MODSEC_AUDIT_ENGINE=On
