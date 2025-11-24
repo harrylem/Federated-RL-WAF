@@ -11,11 +11,11 @@ import sys
 import torch
 import flwr as fl
 
-# --- ΒΗΜΑ 1: GLOBAL SETUP ---
+# --- STEP 1: GLOBAL SETUP ---
 WAF_CONTAINER_NAME = "waf_instance1"
 HONEYPOT_CONTAINER_NAME = "waf_honeypot"
 
-# Σύνδεση με το Docker για γράψιμο κανόνων
+# Connecting to Docker to access ruleset
 client = docker.from_env()
 try:
     waf_container = client.containers.get(WAF_CONTAINER_NAME)
@@ -23,11 +23,11 @@ except docker.errors.NotFound:
     print(f"FATAL ERROR: Δεν βρέθηκε το container '{WAF_CONTAINER_NAME}'!")
     sys.exit(1)
 
-# "Μεταφραστής": Ο ίδιος Vectorizer
+# The vectorizer 
 vectorizer = TfidfVectorizer(max_features=9) 
 vectorizer.fit(["/wp-admin.php", "/vulnerabilities/sqli", "/healthz", "SELECT", "FROM", "script"])
 
-# "Mock βάσεις για λόγους δσκιμής"
+# Mock small scale databases for trial purposes
 FAKE_LOG_DB_WAF = [
     {'uri': '/', 'ip': '1.1.1.1', 'source': 'WAF', 'messages': []},
     {'uri': '/healthz', 'ip': '1.1.1.2', 'source': 'WAF', 'messages': []},
@@ -39,7 +39,7 @@ FAKE_LOG_DB_HONEYPOT = [
     {'uri': '/.env', 'ip': '5.5.5.5', 'source': 'HONEYPOT', 'messages': []}
 ]
 
-# --- ΒΗΜΑ 2: ΤΟ "ΠΕΡΙΒΑΛΛΟΝ" (Gym Env) ---
+# --- STEP 2: THE MAIN ENVIROMNMENT (Gym Env) ---
 class WafEnv(gym.Env):
     def __init__(self, db_source): 
         super(WafEnv, self).__init__()
@@ -52,10 +52,10 @@ class WafEnv(gym.Env):
     def _get_observation(self, log_data):
 
         if 'transaction' in log_data:
-        # "ΑΛΗΘΙΝΟ" log από το Live Mode
+        # Real log from Live Mode
             uri = log_data['transaction']['request']['uri']
         else:
-        # "ΨΕΥΤΙΚΟ" log από το FAKE_LOG_DB (Εκπαίδευση)
+        # Fake log from FAKE_LOG_DB (Training)
             uri = log_data.get('uri', '/') 
 
         vector = vectorizer.transform([uri]).toarray().flatten()
@@ -89,15 +89,15 @@ class WafEnv(gym.Env):
         log_data = self.FAKE_LOG_DB[np.random.randint(len(self.FAKE_LOG_DB))]
         return self._get_observation(log_data), {}
 
-# --- ΒΗΜΑ 3: Ο "LIVE" AGENT 
+# --- STEP 3: THE "LIVE" AGENT 
 
 blocked_uris = set()
 blocked_ips = set()
-rule_id_counter = 9000001 # Ξεκινάμε από ψηλά για να μην έχουμε conflicts
+rule_id_counter = 9000001 # Setting a high counter to avoid potential conflicts
 
 def apply_rule_to_waf(action, log_data):
     """
-    Αυτή η συνάρτηση γράφει τον κανόνα στον 'waf_instance1'
+    'waf_instance1' rule function
     """
     global rule_id_counter
     uri_to_block = log_data['transaction']['request']['uri']
@@ -105,34 +105,33 @@ def apply_rule_to_waf(action, log_data):
     rule_string = ""
 
     if action == 1 and uri_to_block not in blocked_uris:
-        print(f"  [LIVE ACTION] ΑΠΟΦΑΣΗ: Μπλοκάρισμα URI: {uri_to_block}")
+        print(f"  [LIVE ACTION] DESICION: URI BLOCKED: {uri_to_block}")
         rule_string = f'SecRule REQUEST_URI "@streq {uri_to_block}" "id:{rule_id_counter},phase:1,deny,status:403,msg:\'Blocked by Federated RL Agent (URI)\'"'
         blocked_uris.add(uri_to_block)
             
     elif action == 2 and ip_to_block not in blocked_ips:
-        print(f"  [LIVE ACTION] ΑΠΟΦΑΣΗ: Μπλοκάρισμα IP: {ip_to_block}")
+        print(f"  [LIVE ACTION] DECISION: IP BLOCKED: {ip_to_block}")
         rule_string = f'SecRule REMOTE_ADDR "@streq {ip_to_block}" "id:{rule_id_counter},phase:1,deny,status:403,msg:\'Blocked by Federated RL Agent (IP)\'"'
         blocked_ips.add(ip_to_block)
     
     else: # Action == 0 (Do Nothing)
-        print(f"  [LIVE ACTION] ΑΠΟΦΑΣΗ: Αγνοήθηκε.")
+        print(f"  [LIVE ACTION] DECISION: IGNORED.")
         return 
 
     try:
         cmd_write = f"sh -c \"echo '{rule_string}' >> /etc/nginx/dynamic_rules.conf\""
         waf_container.exec_run(cmd_write)
         waf_container.exec_run("nginx -s reload")
-        print(f"  [SUCCESS] Ο ΚΑΝΟΝΑΣ {rule_id_counter} ΕΦΑΡΜΟΣΤΗΚΕ ΣΤΟ WAF!")
+        print(f"  [SUCCESS] THE RULE {rule_id_counter} WAS APPLIED TO THE WAF!")
         rule_id_counter += 1
     except Exception as e:
-        print(f"  [ERROR] Απέτυχα να εφαρμόσω τον κανόνα: {e}")
+        print(f"  [ERROR] FAILED TO APPLY THE RULE: {e}")
 
 def live_log_parser(container_name, model):
     """
-    Αυτό είναι το "ζωντανό αυτί" που ακούει τα logs
-    και χρησιμοποιεί το "Super-Μυαλό" (model) για να πάρει αποφάσεις.
+    Read the logs and use the Federated "Brain" to make decisions
     """
-    print(f"[Live Listener] ΣΥΝΔΕΣΗ (Live) στον: {container_name}")
+    print(f"[Live Listener] Connection (Live) to: {container_name}")
     try:
         container = client.containers.get(container_name)
         for line in container.logs(stream=True, follow=True, since=int(time.time())):
@@ -144,95 +143,94 @@ def live_log_parser(container_name, model):
                     json_data['source'] = 'WAF' if container_name == WAF_CONTAINER_NAME else 'HONEYPOT'
                     print("\n" + "="*20 + f" LIVE LOG ΑΠΟ [{container_name}] " + "="*20)
                     
-                    # 1. Μεταφράζω το log σε εικόνα
+                    # 1. Visualising the log
                     observation = WafEnv(db_source=[])._get_observation(json_data) 
                     
-                    # 2. Ρωτάω το "Super-Μυαλό" τι να κάνει
+                    # 2. "Asking" the federated "brain" for advice
                     action, _states = model.predict(observation, deterministic=True)
                     
-                    # 3. Γράφω τον κανόνα!
+                    # 3. Write the rule
                     apply_rule_to_waf(action, json_data)
                     
                 except json.JSONDecodeError:
                     pass
     except docker.errors.NotFound:
-        print(f"[ERROR] Το 'live' container '{container_name}' δεν βρέθηκε!")
+        print(f"[ERROR] The 'live' container '{container_name}' wasn't found!")
 
-# --- ΒΗΜΑ 4: Ο FLOWER CLIENT 
+# --- STEP 4: THE FLOWER CLIENT 
 class FlowerRLClient(fl.client.NumPyClient):
     def __init__(self, client_id):
         self.client_id = client_id
         if self.client_id == "1":
-            print("[Client 1] Εγώ είμαι ο WAF AGENT (Προσεκτικός). Φορτώνω WAF logs.")
+            print("[Client 1] I am the WAF AGENT (False Poitives). Loading WAF logs.")
             db = FAKE_LOG_DB_WAF
         else:
-            print("[Client 2] Εγώ είμαι ο HONEYPOT AGENT (Επιθετικός). Φορτώνω Honeypot logs.")
+            print("[Client 2] I am the HONEYPOT AGENT (Zero-Day). Loading Honeypot logs.")
             db = FAKE_LOG_DB_HONEYPOT
             
         self.env = WafEnv(db_source=db)
-        self.model = PPO("MlpPolicy", self.env, verbose=0) # Κάθε client έχει το δικό του PPO model
+        self.model = PPO("MlpPolicy", self.env, verbose=0) # Every client has its own PPO model
 
     def get_parameters(self, config):
-        print(f"[Client {self.client_id}] Στέλνω το 'μυαλό' μου...")
+        print(f"[Client {self.client_id}] Providing my brain...")
         return [param.detach().cpu().numpy() for param in self.model.policy.parameters()]
 
     def set_parameters(self, parameters):
-        print(f"[Client {self.client_id}] Πήρα νέο 'Super-μυαλό'!")
+        print(f"[Client {self.client_id}] Updated with new federated brain'!")
         params_dict = zip(self.model.policy.state_dict().keys(), parameters)
         state_dict = {k: torch.tensor(v) for k, v in params_dict}
         self.model.policy.load_state_dict(state_dict, strict=True)
 
     def fit(self, parameters, config):
-        print(f"[Client {self.client_id}] Ξεκινάω τοπική εκπαίδευση (fit)...")
+        print(f"[Client {self.client_id}] Beginning local training (fit)...")
         self.set_parameters(parameters)
-        self.model.learn(total_timesteps=1000) # Γρήγορη εκπαίδευση
-        print(f"[Client {self.client_id}] Η εκπαίδευση τελείωσε.")
+        self.model.learn(total_timesteps=1000) # Fast learning
+        print(f"[Client {self.client_id}] Training finished.")
         return self.get_parameters(config={}), self.env.max_steps, {}
 
     def evaluate(self, parameters, config):
         return 0.0, 1, {}
 
-# --- ΒΗΜΑ 5: ΤΟ ΤΕΛΙΚΟ ΠΡΟΓΡΑΜΜΑ ---
+# --- STEP 5: FINAL PROGRAMM ---
 if __name__ == "__main__":
     
-    # 1. Παίρνω το ID (1 ή 2) από την εντολή
+    # 1. Get the ID (1 or 2)
     client_id = sys.argv[1] if len(sys.argv) > 1 else "1"
     
-    # 2. Φτιάχνω τον Client
+    # 2. Creating the client
     client_object = FlowerRLClient(client_id=client_id)
     
-    # --- ΦΑΣΗ 1: ΟΜΟΣΠΟΝΔΙΑ (ΕΚΠΑΙΔΕΥΣΗ) ---
-    print(f"--- [CLIENT {client_id}] ΦΑΣΗ 1: Σύνδεση στον Server για Ομοσπονδία ---")
+    # --- Phase 1: Federation (Training) ---
+    print(f"--- [CLIENT {client_id}] Phase 1: Coonectiing to Server for Federation ---")
     
     fl.client.start_numpy_client(
         server_address="127.0.0.1:8090", 
         client=client_object
     )
     
-    # --- ΦΑΣΗ 2: "ΚΛΕΙΣΤΟΣ ΒΡΟΧΟΣ" (LIVE MODE) ---
-    # (Αυτό θα τρέξει ΜΟΝΟ ΑΦΟΥ ο server κλείσει την 'Ομοσπονδία')
+    # --- Phase 2: "CLOSED LOOP" (LIVE MODE) ---
+    # (This will run only after the server finalises the 'Federation')
     
     print("\n" + "="*50)
-    print(f"--- [CLIENT {client_id}] ΦΑΣΗ 2: Η Ομοσπονδία τελείωσε! ---")
-    print(f"--- ΞΕΚΙΝΑΩ 'ΚΛΕΙΣΤΟ ΒΡΟΧΟ' (LIVE MODE) ---")
-    print(f"--- Χρησιμοποιώ το τελικό 'Super-Μυαλό' ---")
+    print(f"--- [CLIENT {client_id}] Phase 2: Federation is over! ---")
+    print(f"--- Starting 'CLOSED LOOP' (LIVE MODE) ---")
+    print(f"--- I use the final 'Federated Brain' ---")
     print("="*50 + "\n")
     
-    # Το "Super-Μυαλό" που έμεινε από την εκπαίδευση
+    # The final version of the federated super-brain
     final_model = client_object.model 
     
-    # Διάλέγει ποιο log θα ακούει ο καθένας
     if client_id == "1":
-        # Ο Agent 1 ακούει τον "πραγματικό" WAF
+        #  Agent 1 listens to the real WAF
         target_container = WAF_CONTAINER_NAME
     else:
-        # Ο Agent 2 ακούει την "παγίδα"
+        # Ο Agent 2 listens to the trapped one (Honeypot)
         target_container = HONEYPOT_CONTAINER_NAME
 
-    # Ξεκινά τον "Live" listener και κρατά το script ζωντανό
+    # Begin with "Live" listener and keep the script alive
     try:
         live_log_parser(target_container, final_model)
     except KeyboardInterrupt:
-        print(f"\n[Client {client_id}] Σταματάω... Αυτοί είναι οι κανόνες που έμαθα:")
+        print(f"\n[Client {client_id}] Stopping...these are the rules learned!!:")
         print(f"Blocked URIs: {blocked_uris}")
         print(f"Blocked IPs: {blocked_ips}")
