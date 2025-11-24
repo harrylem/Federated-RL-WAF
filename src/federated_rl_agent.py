@@ -20,7 +20,7 @@ client = docker.from_env()
 try:
     waf_container = client.containers.get(WAF_CONTAINER_NAME)
 except docker.errors.NotFound:
-    print(f"FATAL ERROR: Δεν βρέθηκε το container '{WAF_CONTAINER_NAME}'!")
+    print(f"FATAL ERROR: No container found!! '{WAF_CONTAINER_NAME}'!")
     sys.exit(1)
 
 # The vectorizer 
