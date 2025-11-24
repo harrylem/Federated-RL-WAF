@@ -1,7 +1,7 @@
 import flwr as fl
 
 if __name__ == "__main__":
-    print("[Server] Ξεκινάω τον Federated RL Server (v1.7)...")
+    print("[Server] Beginning Federated RL Server (v1.7)...")
     
    
     strategy = fl.server.strategy.FedAvg(
@@ -9,9 +9,9 @@ if __name__ == "__main__":
         min_available_clients=2
     )
     
-    # Ο server ξεκινά στην πόρτα 8090
+    # Server starts at port 8090
     fl.server.start_server(
         server_address="0.0.0.0:8090", 
-        config=fl.server.ServerConfig(num_rounds=3), # 3 γύροι "ομοσπονδίας"
+        config=fl.server.ServerConfig(num_rounds=3), # 3 Federation rounds"
         strategy=strategy
     )
