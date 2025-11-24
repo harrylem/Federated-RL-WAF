@@ -7,27 +7,27 @@ from stable_baselines3 import PPO
 import sys
 import torch 
 
-# --- ΒΗΜΑ 1: Ο "ΜΕΤΑΦΡΑΣΤΗΣ" (Vectorization) ---
+# --- STEP 1:Vectorization ---
 vectorizer = TfidfVectorizer(max_features=9) 
 vectorizer.fit(["/wp-admin.php", "/vulnerabilities/sqli", "/healthz", "SELECT", "FROM", "script"])
 
-# --- ΒΗΜΑ 2: ΤΑ ΔΕΔΟΜΕΝΑ 
+# --- STEP 2: DATA 
 
-# Δεδομένα ΜΟΝΟ από το WAF (False Positives + Γνωστές Απειλές)
+# DATA FROM THE WAF (False Positives + Known Threats)
 FAKE_LOG_DB_WAF = [
     {'uri': '/', 'ip': '1.1.1.1', 'source': 'WAF', 'messages': []},
     {'uri': '/healthz', 'ip': '1.1.1.2', 'source': 'WAF', 'messages': []},
     {'uri': '/vulnerabilities/sqli?id=1', 'ip': '2.2.2.2', 'source': 'WAF', 'messages': ['SQL Injection Attack']},
 ]
 
-# Δεδομένα ΜΟΝΟ από το Honeypot (Zero-Day Απειλές)
+# DATA FROM THE Honeypot (Zero-DayThreats) 
 FAKE_LOG_DB_HONEYPOT = [
     {'uri': '/wp-admin.php', 'ip': '3.3.3.3', 'source': 'HONEYPOT', 'messages': []},
     {'uri': '/shell.php', 'ip': '4.4.4.4', 'source': 'HONEYPOT', 'messages': []},
     {'uri': '/.env', 'ip': '5.5.5.5', 'source': 'HONEYPOT', 'messages': []}
 ]
 
-# --- ΒΗΜΑ 3: ΤΟ "ΠΕΡΙΒΑΛΛΟΝ" (Gym Environment) ---
+# --- STEP 3: Gym Environment ---
 class WafEnv(gym.Env):
     def __init__(self, db_source): 
         super(WafEnv, self).__init__()
@@ -37,7 +37,7 @@ class WafEnv(gym.Env):
         
         self.FAKE_LOG_DB = db_source 
         
-        self.max_steps = 1000 # Max steps *ανά γύρο*
+        self.max_steps = 1000 # Max steps *per round*
         self.current_step = 0
 
     def _get_observation(self, log_data):
@@ -73,61 +73,61 @@ class WafEnv(gym.Env):
         log_data = self.FAKE_LOG_DB[np.random.randint(len(self.FAKE_LOG_DB))]
         return self._get_observation(log_data), {}
 
-# --- ΒΗΜΑ 4: Ο FLOWER RL CLIENT ---
+# --- STEP 4: Ο FLOWER RL CLIENT ---
 class FlowerRLClient(fl.client.NumPyClient):
     def __init__(self, client_id):
         self.client_id = client_id
         
-        # --- ΚΑΘΕ CLIENT ΦΤΙΑΧΝΕΙ ΤΟ ΔΙΚΟ ΤΟΥ ΠΕΡΙΒΑΛΛΟΝ! ---
+        # --- EVERY CLIENT MAKES IT'S OWN ENVIRONMENT! ---
         if self.client_id == "1":
-            print("[Client 1] Εγώ είμαι ο WAF AGENT (Προσεκτικός). Φορτώνω WAF logs.")
+            print("[Client 1] I am the WAF AGENT. Loading WAF logs.")
             db = FAKE_LOG_DB_WAF
         else:
-            print("[Client 2] Εγώ είμαι ο HONEYPOT AGENT (Επιθετικός). Φορτώνω Honeypot logs.")
+            print("[Client 2] I am the HONEYPOT AGENT. Loading Honeypot logs.")
             db = FAKE_LOG_DB_HONEYPOT
             
         self.env = WafEnv(db_source=db)
         
-        # Κάθε client έχει το δικό του PPO model
+        # Every client utilizes its own PPO model.
         self.model = PPO("MlpPolicy", self.env, verbose=0)
 
     def get_parameters(self, config):
-        # (τα weights του νευρωνικού δικτύου)
-        print(f"[Client {self.client_id}] Στέλνω το 'μυαλό' μου στον Server...")
-        # (Αυτό μετατρέπει το Pytorch model σε λίστα που καταλαβαίνει το Flower)
+        # neural network weights.
+        print(f"[Client {self.client_id}] Sending my 'brain' to Server...")
+        # Modyfying the Pytorch model to a lit Flower understands.
         return [param.detach().cpu().numpy() for param in self.model.policy.parameters()]
 
     def set_parameters(self, parameters):
-        print(f"[Client {self.client_id}] Πήρα νέο 'Super-μυαλό'!")
-        # (Αυτό φορτώνει τη λίστα στο Pytorch model)
+        print(f"[Client {self.client_id}] Retrieved new 'Super-brain'!")
+        # Loading the list of the Pytorch model.
         params_dict = zip(self.model.policy.state_dict().keys(), parameters)
         state_dict = {k: torch.tensor(v) for k, v in params_dict}
         self.model.policy.load_state_dict(state_dict, strict=True)
 
     def fit(self, parameters, config):
-        # "Ώρα για εκπαίδευση!"
-        print(f"[Client {self.client_id}] Ξεκινάω τοπική εκπαίδευση (fit)...")
+        # Training!!!
+        print(f"[Client {self.client_id}] Beginning local training (fit)...")
         
-        # 1. Παίρνω το νέο "μυαλό" από τον server
+        # 1.Getting the new "brain" from the server.
         self.set_parameters(parameters)
         
-        # 2. Εκπαιδεύσμαι πάνω σε αυτό 
+        # 2. Training based on it.
         self.model.learn(total_timesteps=1000)
         
-        # 3. Στέλνω το *νέο, βελτιωμένο* "μυαλό" πίσω
-        print(f"[Client {self.client_id}] Η εκπαίδευση τελείωσε.")
+        # 3. Sending the newly trained brain back.
+        print(f"[Client {self.client_id}] Training finished.")
         return self.get_parameters(config={}), self.env.max_steps, {}
 
     def evaluate(self, parameters, config):
         return 0.0, 1, {}
 
-# --- ΒΗΜΑ 5: ΞΕΚΙΝΑΕΙ Ο CLIENT ---
+# --- STEP 5: CLIENT RUNNING ---
 if __name__ == "__main__":
     
-    # Παίρνω το ID (1 ή 2) από την εντολή
+    # Receive the ID (1 or 2)
     client_id = sys.argv[1] if len(sys.argv) > 1 else "1"
     
-    # Φτιάχνω τον σωστό Client (WAF ή Honeypot)
+    # Creating the write client (WAF or Honeypot)
     client = FlowerRLClient(client_id=client_id)
     
     print(f"Ξεκινάω τον Flower RL Client {client_id} (v1.7)...")
