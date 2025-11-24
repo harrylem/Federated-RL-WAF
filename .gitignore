@@ -7,7 +7,6 @@ __pycache__/
 env/
 venv/
 
-# Models & Logs (Προαιρετικά, αν θες να ανεβάσεις το zip άστο εκτός)
 *.zip
 waf_tensorboard_logs/
 
