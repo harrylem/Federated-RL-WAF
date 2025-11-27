@@ -38,7 +38,7 @@ The Reinforcement Learning agent maximizing reward over time (Learning to distin
 * Docker & Docker Compose
 * Python 3.10+
 
-### 1. Start the Infrastructure
+### 3. Start the Infrastructure
 Spin up the WAFs, the DVWA, and the Honeypot with one command:
 ```bash
 docker-compose up -d
@@ -57,6 +57,14 @@ python3 src/federated_rl_agent.py 1
 
 Terminal 3 (Honeypot Agent):
 python3 src/federated_rl_agent.py 2
+
+### 4. Scalability Simulation (Virtual Client Engine) - Commited 27/11/2025
+To demonstrate scalability, this project includes a simulation mode that spins up **10 Virtual Clients** with Non-IID data distributions (SQLi Specialists vs XSS Specialists).
+
+Run the simulation:
+```bash
+python3 src/simulation.py
+
 
 👨‍💻 Author
 LEMONTZOGLOU CHARALAMBOS
