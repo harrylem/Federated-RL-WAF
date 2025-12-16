@@ -9,11 +9,11 @@
 ## 📖 Overview
 This project implements a **Self-Improving Web Application Firewall (WAF)** system using **Federated Reinforcement Learning**.
 
-Unlike traditional WAFs that rely on static signatures, this system employs two autonomous RL Agents that collaborate to:
-1.  **Minimize False Positives:** By learning from normal traffic on a Production WAF protecting a DVWA instance.
+Unlike traditional WAFs that rely on static signatures, this system employs autonomous RL Agents that collaborate to:
+1.  **Minimize False Positives:** By learning from normal traffic on a Production WAF.
 2.  **Detect Zero-Day Attacks:** By learning from a specialized Web Honeypot.
 3.  **Share Knowledge:** Using Federated Learning (Flower) to aggregate insights without sharing raw sensitive logs.
-4.  **Close the Loop:** Automatically generating and applying ModSecurity rules (`SecRule`) in real-time upon detecting threats.
+4.  **Close the Loop:** Automatically generating and applying ModSecurity rules (`SecRule`) in real-time.
 
 ## 🏗️ Architecture
 The system is fully containerized using **Docker Compose**:
@@ -23,14 +23,34 @@ The system is fully containerized using **Docker Compose**:
 * **Flower Server:** Aggregates the RL model weights (FedAvg).
 * **RL Agent:** Uses `Gymnasium` and `Stable-Baselines3` (PPO) to parse logs and decide actions.
 
-## 📸 Proof of Concept
+---
+
+## 🧪 Experiments & Simulations
+Beyond the live demo, this repository includes scientific simulations to prove scalability and performance.
+
+### 1. Scalability Simulation (Virtual Client Engine)
+To demonstrate the system's ability to scale, we implemented a simulation with **10 Virtual Clients** using Non-IID (Non-Identically Distributed) data.
+* **Scenario:** 5 Clients specialize in SQL Injection defense, while 5 Clients specialize in XSS defense.
+* **Goal:** Prove that the Global Model learns *both* attack vectors effectively.
+* **Run:** `python3 src/simulation.py`
+
+### 2. Baseline Comparison
+To validate the Reinforcement Learning approach, we compare it against a standard supervised learning baseline (**Logistic Regression**).
+* **Metrics:** Accuracy, Log Loss.
+* **Comparison:** While the Baseline offers fast convergence for classification, the RL Agent provides actionable decisions (Block IP/URI) and adapts to reward penalties (e.g., avoiding false positives).
+* **Run:** `python3 src/baseline.py`
+
+---
+
+## 📸 Proof of Concept (Live Demo)
 
 ### 1. Real-Time Defense (Closed Loop)
 The Agent detects a Zero-Day attack on the Honeypot and patches the Real WAF instantly.
-![Attack Blocked](screenshots/Client2_Live_Training.jpg)
+![Attack Blocked](screenshots/attack_success.png)
+
 ### 2. Training Performance
 The Reinforcement Learning agent maximizing reward over time (Learning to distinguish attacks vs normal traffic).
-![TensorBoard](screenshots/Tensor_Board_Live_Training_Data.jpg)
+![TensorBoard](screenshots/tensorboard_graph.png)
 
 ## 🛠️ How to Run
 
@@ -38,9 +58,9 @@ The Reinforcement Learning agent maximizing reward over time (Learning to distin
 * Docker & Docker Compose
 * Python 3.10+
 
-### 3. Start the Infrastructure
-Spin up the WAFs, the DVWA, and the Honeypot with one command:
+### Installation
 ```bash
+pip install -r requirements.txt
 docker-compose up -d
 
 2. Install Dependencies
@@ -58,12 +78,13 @@ python3 src/federated_rl_agent.py 1
 Terminal 3 (Honeypot Agent):
 python3 src/federated_rl_agent.py 2
 
-### 4. Scalability Simulation (Virtual Client Engine) - Commited 27/11/2025
 To demonstrate scalability, this project includes a simulation mode that spins up **10 Virtual Clients** with Non-IID data distributions (SQLi Specialists vs XSS Specialists).
 
 Run the simulation:
-```bash
+# Scalability Test (10 Clients)
 python3 src/simulation.py
+# Baseline Benchmark
+python3 src/baseline.py
 
 
 👨‍💻 Author

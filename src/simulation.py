@@ -1,4 +1,5 @@
 import flwr as fl
+from flwr.server.strategy import FedAvg, FedMedian
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from stable_baselines3 import PPO
@@ -115,14 +116,23 @@ def client_fn(cid: str):
 if __name__ == "__main__":
     print(f"Beginning Simulation with {NUM_CLIENTS} Clients (Non-IID)...")
     
+    # Choose strategy: 1) FedAvg Or 2) FedMedian
     # We define a strategy (Server)
-    strategy = fl.server.strategy.FedAvg(
-        fraction_fit=CLIENTS_PER_ROUND / NUM_CLIENTS, # Choosing 50% of clients
-        fraction_evaluate=0.0, # No global evaluation 
+    # strategy = fl.server.strategy.FedAvg(
+    #    fraction_fit=CLIENTS_PER_ROUND / NUM_CLIENTS, # Choosing 50% of clients
+    #    fraction_evaluate=0.0, # No global evaluation 
+    #    min_fit_clients=CLIENTS_PER_ROUND,
+    #    min_available_clients=NUM_CLIENTS,
+    #)
+    
+    # FedMedian is a more resilient strategy on "poisoned" updates from clients!!!
+    strategy = fl.server.strategy.FedMedian(
+        fraction_fit=CLIENTS_PER_ROUND / NUM_CLIENTS,
+        fraction_evaluate=0.0,
         min_fit_clients=CLIENTS_PER_ROUND,
         min_available_clients=NUM_CLIENTS,
-    )
-
+     )
+    
     # We run the simulation!
     # Flower Simulation - Virtual Client Engine.
     fl.simulation.start_simulation(
