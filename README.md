@@ -1,4 +1,4 @@
-# 🛡️ Federated Reinforcement Learning WAF - DEMO v1.1
+# Federated Reinforcement Learning WAF - DEMO v1.1
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue)
@@ -6,7 +6,7 @@
 ![RL](https://img.shields.io/badge/Reinforcement%20Learning-PPO-orange)
 ![Security](https://img.shields.io/badge/Security-ModSecurity-red)
 
-## 📖 Overview
+##Overview
 This project implements a **Self-Improving Web Application Firewall (WAF)** system using **Federated Reinforcement Learning**.
 
 Unlike traditional WAFs that rely on static signatures, this system employs autonomous RL Agents that collaborate to:
@@ -15,7 +15,7 @@ Unlike traditional WAFs that rely on static signatures, this system employs auto
 3.  **Share Knowledge:** Using Federated Learning (Flower) to aggregate insights without sharing raw sensitive logs.
 4.  **Close the Loop:** Automatically generating and applying ModSecurity rules (`SecRule`) in real-time.
 
-## 🏗️ Architecture
+##Architecture
 The system is fully containerized using **Docker Compose**:
 
 * **Real WAF (Client 1):** Nginx + ModSecurity protecting a vulnerable app (DVWA).
@@ -52,7 +52,7 @@ The Agent detects a Zero-Day attack on the Honeypot and patches the Real WAF ins
 The Reinforcement Learning agent maximizing reward over time (Learning to distinguish attacks vs normal traffic).
 ![TensorBoard](screenshots/tensorboard_graph.png)
 
-## 🛠️ How to Run
+## 🛠 How to Run
 
 ### Prerequisites
 * Docker & Docker Compose
@@ -70,14 +70,16 @@ pip install -r requirements.txt
 Open 3 terminals:
 
 Terminal 1 (Server):
+```
 python3 src/flower_server.py
-
+```
 Terminal 2 (WAF Agent):
+```
 python3 src/federated_rl_agent.py 1
-
+```
 Terminal 3 (Honeypot Agent):
+```
 python3 src/federated_rl_agent.py 2
-
 To demonstrate scalability, this project includes a simulation mode that spins up **10 Virtual Clients** with Non-IID data distributions (SQLi Specialists vs XSS Specialists).
 
 Run the simulation:
