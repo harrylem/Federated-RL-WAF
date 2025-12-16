@@ -67,3 +67,7 @@ bash
 ```
 python3 src/simulation.py
 ```
+👨‍💻 Author
+LEMONTZOGLOU CHARALAMBOS
+
+This project was developed as part of my Thesis.
