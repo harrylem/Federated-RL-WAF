@@ -36,6 +36,32 @@ services:
     networks:
       - waf_network
 
+  waf_honeypot_2:
+      image: owasp/modsecurity-crs:3.3.2-nginx
+      container_name: honey_admin # Fake admin panel (For bots searching for login type pages)
+      ports:
+        - "8089:80"
+      volumes:
+        - ./honeynet_configs/admin/honey_admin.conf:/etc/nginx/templates/conf.d/default.conf.template
+        - ./honeynet_configs/admin/index.html:/usr/share/nginx/html/index.html
+        - ./honeynet_configs/admin_logs:/var/log/nginx
+      environment:
+        - MODSEC_AUDIT_ENGINE=On
+      networks:
+        - waf_network
+
+  waf_honeypot_3:
+      image: owasp/modsecurity-crs:3.3.2-nginx
+      container_name: honey_api # Fake API endpoint (For bots searching for API endpoints)
+      ports:
+        - "8091:80"
+      volumes:
+        - ./honeynet_configs/api/honey_api.conf:/etc/nginx/templates/conf.d/default.conf.template
+        - ./honeynet_configs/api_logs:/var/log/nginx
+      environment:
+        - MODSEC_AUDIT_ENGINE=On
+      networks:
+        - waf_network
 networks:
   waf_network:
     driver: bridge

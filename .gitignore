@@ -1,3 +1,10 @@
+# Ignore runtime state files
+agent_log_state.json
+
+# Ignore actual log files
+*.log
+honeynet_configs/**/error.log
+
 # Python junk
 __pycache__/
 *.pyc
