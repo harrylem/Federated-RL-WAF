@@ -1,10 +1,11 @@
-# Federated Reinforcement Learning WAF - DEMO v1.1
+# Federated Reinforcement Learning WAF - DEMO v1.2
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue)
 ![Flower](https://img.shields.io/badge/Federated%20Learning-Flower-green)
 ![RL](https://img.shields.io/badge/Reinforcement%20Learning-PPO-orange)
 ![Security](https://img.shields.io/badge/Security-ModSecurity-red)
+![Honeynet](https://img.shields.io/badge/Honeynet-API%20%26%20Admin-purple)
 
 ## Overview
 This project implements a **Self-Improving Web Application Firewall (WAF)** system using **Federated Reinforcement Learning**.
@@ -19,9 +20,24 @@ Unlike traditional WAFs that rely on static signatures, this system employs two 
 The system is fully containerized using **Docker Compose**:
 
 * **Real WAF (Client 1):** Nginx + ModSecurity protecting a vulnerable app (DVWA).
-* **Honeypot (Client 2):** Nginx + ModSecurity configured as a trap (High-Interaction).
+* **Honeynet System (Client 2):** * **Honeypot:** High-Interaction Nginx + ModSecurity trap.
+    * **Honeynet API & Admin:** A centralized interface to manage logs, visualize attack vectors, and monitor the honeypot status.
+* **CSIC 2010 Dataset - Optional (Client 3):** Script for pre-training the model with a CSV file containing 61k+ samples of documented traffic 
 * **Flower Server:** Aggregates the RL model weights (FedAvg).
-* **RL Agent:** Uses `Gymnasium` and `Stable-Baselines3` (PPO) to parse logs and decide actions.
+* **RL Agent (`federated_rl_agent.py`):** * Updated to parse structured **JSON logs** for precise feature extraction.
+    * Interacts with the Honeynet API for real-time data retrieval.
+    * Uses `Gymnasium` and `Stable-Baselines3` (PPO) to decide blocking actions.
+
+## Key Features: Honeynet & Data Handling (New) - v1.2
+
+### Advanced Honeynet Ecosystem
+The logic has been expanded beyond simple log parsing. The system now includes:
+* **Honeynet API:** A dedicated API endpoint that captures and serves attack data, allowing the agents to pull structured threat intelligence.
+* **Admin Dashboard:** A visual interface for monitoring the Honeynet's status and viewing raw log data.
+
+### Structured Logging & Agent Logic
+* **JSON Log Parsing:** The log processing pipeline has been upgraded to handle **JSON files**. This ensures robust parsing of request headers, bodies, and attack signatures.
+* **Updated Agent Logic (`federated_rl_agent.py`):** The agent code has been refactored to consume the new JSON format, enabling more accurate state representation for the Reinforcement Learning model.
 
 ## Proof of Concept
 
@@ -48,17 +64,22 @@ pip install -r requirements.txt
 Open 3 terminals:
 
 Terminal 1 (Server):
-```
+```bash
 python3 src/flower_server.py
 ```
 Terminal 2 (WAF Agent):
-```
+```bash
 python3 src/federated_rl_agent.py 1
 ```
 Terminal 3 (Honeypot Agent):
-```
+```bash
 python3 src/federated_rl_agent.py 2
 ```
+Terminal 4 (Dataset Knowledge Injection - Optional) # To pre-train model using 61.000+ records from the CSIC 2010 Dataset!!
+```bash
+python3 src/dataset_client.py
+```
+
 ### 4. Scalability Simulation (Virtual Client Engine) - Commited 27/11/2025
 To demonstrate scalability, this project includes a simulation mode that spins up **10 Virtual Clients** with Non-IID data distributions (SQLi Specialists vs XSS Specialists).
 

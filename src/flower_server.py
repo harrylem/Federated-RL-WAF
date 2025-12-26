@@ -12,6 +12,6 @@ if __name__ == "__main__":
     # Server starts at port 8090
     fl.server.start_server(
         server_address="0.0.0.0:8090", 
-        config=fl.server.ServerConfig(num_rounds=3), # 3 Federation rounds"
+        config=fl.server.ServerConfig(num_rounds=50), # 50 Federation rounds"
         strategy=strategy
     )
