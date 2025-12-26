@@ -20,6 +20,7 @@ The system is fully containerized using **Docker Compose**:
 
 * **Real WAF (Client 1):** Nginx + ModSecurity protecting a vulnerable app (DVWA).
 * **Honeypot (Client 2):** Nginx + ModSecurity configured as a trap (High-Interaction).
+* **CSIC 2010 Dataset - Optional (Client 3):** Script for pre-training the model with a CSV file containing 61k+ samples of documented traffic 
 * **Flower Server:** Aggregates the RL model weights (FedAvg).
 * **RL Agent:** Uses `Gymnasium` and `Stable-Baselines3` (PPO) to parse logs and decide actions.
 
@@ -50,17 +51,22 @@ pip install -r requirements.txt
 Open 3 terminals:
 
 Terminal 1 (Server):
-```
+```bash
 python3 src/flower_server.py
 ```
 Terminal 2 (WAF Agent):
-```
+```bash
 python3 src/federated_rl_agent.py 1
 ```
 Terminal 3 (Honeypot Agent):
-```
+```bash
 python3 src/federated_rl_agent.py 2
 ```
+Terminal 4 (Dataset Knowledge Injection - Optional) # To pre-train model using 61.000+ records from the CSIC 2010 Dataset!!
+```bash
+python3 src/dataset_client.py
+```
+
 ### 4. Scalability Simulation (Virtual Client Engine) - Commited 27/11/2025
 To demonstrate scalability, this project includes a simulation mode that spins up **10 Virtual Clients** with Non-IID data distributions (SQLi Specialists vs XSS Specialists).
 
