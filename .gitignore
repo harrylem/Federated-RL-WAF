@@ -6,6 +6,8 @@ agent_log_state.json
 honeynet_configs/**/error.log
 honeynet_configs/**/access.log
 waf_config/default.conf.bak
+honeypot_config/default.conf.bak
+
 # Python junk
 __pycache__/
 *.pyc
@@ -24,3 +26,4 @@ saved_models/
 .idea/
 *.venv
 
+honeypot_config/default.conf.bak
