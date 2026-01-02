@@ -35,8 +35,21 @@ except Exception as e:
     sys.exit(1)
 
 # The vectorizer 
-vectorizer = TfidfVectorizer(max_features=9) 
-vectorizer.fit(["/wp-admin.php", "/vulnerabilities/sqli", "/healthz", "SELECT", "FROM", "script"])
+vectorizer = TfidfVectorizer(max_features=50) 
+vectorizer.fit([
+    # ModSecurity Keywords
+    "SQL Injection", "XSS", "Cross-site Scripting", "Remote Command Execution",
+    "Scanner", "Crawler", "Bot", "Denied", "Access denied", "Forbidden",
+    "PHP Injection", "Anomaly", "Score Exceeded", "Inbound Anomaly",
+    # Attack Payloads
+    "SELECT", "UNION", "AND", "OR", "1=1", "ALERT", "SCRIPT", "IFRAME",
+    "etc/passwd", "cmd.exe", "bin/sh", "wget", "curl",
+    # Common URI parts
+    "/", "index", "php", "html", "login", "admin", "dashboard",
+    "/wp-admin", "/vulnerabilities", "id", "search", "query",
+    # User Agents & Headers
+    "Mozilla", "Chrome", "Safari", "Gecko", "Postman", "Python"
+])
 
 # Mock small scale databases for trial purposes
 FAKE_LOG_DB_WAF = [
@@ -54,8 +67,8 @@ FAKE_LOG_DB_HONEYPOT = [
 class WafEnv(gym.Env):
     def __init__(self, db_source): 
         super(WafEnv, self).__init__()
-        self.action_space = spaces.Discrete(3) # 0: Pass, 1: Block URI, 2: Block IP
-        self.observation_space = spaces.Box(low=0, high=1, shape=(9,), dtype=np.float32)
+        self.action_space = spaces.Discrete(2) # 1: Allow, 2: Block 
+        self.observation_space = spaces.Box(low=0, high=1, shape=(50,), dtype=np.float32)
         self.FAKE_LOG_DB = db_source
         self.max_steps = 1000
         self.current_step = 0
@@ -68,7 +81,19 @@ class WafEnv(gym.Env):
             # Fake log from FAKE_LOG_DB (Training)
             uri = log_data.get('uri', '/') 
 
-        vector = vectorizer.transform([uri]).toarray().flatten()
+       # We access Modsecurity messages if any
+        modsec_alerts = ""
+        if 'transaction' in log_data and 'messages' in log_data['transaction']:
+            for msg in log_data['transaction']['messages']:
+                # We combinee WAF messages (e.g. "SQL Injection detected...")
+                modsec_alerts += " " + msg['message']
+        
+        # Combination of URI and ModSecurity alerts
+        # e.g. : "/vulnerabilities/sqli SQL Injection Attack Detected"
+        combined_input = uri + " " + modsec_alerts
+        
+        # Transform to numeric vector
+        vector = vectorizer.transform([combined_input]).toarray().flatten()
         return vector
 
     def _get_reward(self, log_data, action):
@@ -76,9 +101,9 @@ class WafEnv(gym.Env):
         source = log_data.get('source', 'WAF') 
 
         # Reward Logic
-        if uri == "/healthz" and (action == 1 or action == 2): return -100
+        if uri == "/healthz" and (action == 1): return -100
         if source == 'HONEYPOT':
-            if action == 1 or action == 2: return 100
+            if action == 1: return 100
             if action == 0: return -50
         if source == 'WAF' and log_data.get('messages'): # Attack detected by WAF signature
             if action == 1 or action == 2: return 10
@@ -103,9 +128,8 @@ class WafEnv(gym.Env):
 # --- STEP 3: THE "LIVE" AGENT LOGIC ---
 
 def apply_rule_to_waf(action, log_data):
-    """
-    Applies the decision to the 'waf_instance1' container.
-    """
+
+    #Applies the decision to the 'waf_instance1' container.
     global rule_id_counter
     
     # Safety check
@@ -120,19 +144,18 @@ def apply_rule_to_waf(action, log_data):
 
     rule_string = ""
 
-    if action == 1 and uri_to_block not in blocked_uris:
-        print(f"  [LIVE ACTION] DECISION: URI BLOCKED: {uri_to_block}")
-        rule_string = f'SecRule REQUEST_URI "@streq {uri_to_block}" "id:{rule_id_counter},phase:1,deny,status:403,msg:\'Blocked by Federated RL Agent (URI)\'"'
-        blocked_uris.add(uri_to_block)
-            
-    elif action == 2 and ip_to_block not in blocked_ips:
-        print(f"  [LIVE ACTION] DECISION: IP BLOCKED: {ip_to_block}")
-        rule_string = f'SecRule REMOTE_ADDR "@streq {ip_to_block}" "id:{rule_id_counter},phase:1,deny,status:403,msg:\'Blocked by Federated RL Agent (IP)\'"'
-        blocked_ips.add(ip_to_block)
-    
-    else: # Action == 0 (Do Nothing)
+    if action == 1:
+        # We check if IP is already blocked
+        if ip_to_block not in blocked_ips:
+            print(f"  [LIVE ACTION] DECISION: BLOCKING ATTACKER IP: {ip_to_block}")
+            rule_string = f'SecRule REMOTE_ADDR "@streq {ip_to_block}" "id:{rule_id_counter},phase:1,deny,status:403,msg:\'Blocked by Federated RL Agent (IP)\'"'
+            blocked_ips.add(ip_to_block)
+        else:
+            print(f"  [LIVE ACTION] IP {ip_to_block} is already blocked.")
+            return
+    else: # Action == 0
         print(f"  [LIVE ACTION] DECISION: IGNORED.")
-        return 
+        return
 
     # Write rule to container
     try:
@@ -145,9 +168,8 @@ def apply_rule_to_waf(action, log_data):
         print(f"  [ERROR] FAILED TO APPLY THE RULE: {e}")
 
 def live_log_parser(container_name, model):
-    """
-    Read the logs and use the Federated "Brain" to make decisions
-    """
+    
+    #Read the logs and use the Federated "Brain" to make decisions
     print(f"[Live Listener] Connecting (Live) to: {container_name}")
     try:
         container = client.containers.get(container_name)
@@ -165,7 +187,10 @@ def live_log_parser(container_name, model):
                     # 1. Transform log to observation vector
                     # Note: We instantiate a temporary Env just to use the helper method _get_observation
                     observation = WafEnv(db_source=[])._get_observation(json_data) 
-                    
+                    if np.sum(observation) == 0:
+                        print(f"  [BLIND] The Agent didn't recognize any keywords in the URL!")
+                    else:
+                        print(f"[SEEING] Vector Strength: {np.sum(observation):.2f}")
                     # 2. "Asking" the federated "brain" for advice
                     action, _states = model.predict(observation, deterministic=True)
                     
@@ -312,7 +337,33 @@ class FlowerRLClient(fl.client.NumPyClient):
         return self.get_parameters(config={}), self.env.max_steps, {}
 
     def evaluate(self, parameters, config):
-        return 0.0, 1, {}
+        # Update the local model with the new global weights received from the Server
+        self.set_parameters(parameters)
+        # We run a small test to track performance. We run 5 episodes to get a stable average score.
+        total_rewards = []
+        TEST_EPISODES = 5
+        # We use a temporary evaluation loop
+        for _ in range(5):
+            obs, _ = self.env.reset()
+            done = False
+            episode_reward = 0
+            while not done:
+                # Deterministic = True for strict action selection
+                action, _ = self.model.predict(obs, deterministic=True)
+                # Execute the action in the simulated environment
+                obs, reward, done, _, _ = self.env.step(action)
+                episode_reward += reward
+
+            total_rewards.append(episode_reward)
+        #Calculate the Mean Reward (The score of the exam)
+        mean_reward = float(sum(total_rewards) / len(total_rewards))
+
+        print(f"[Client {self.client_id}] Evaluation Mean reward: {mean_reward:.2f}")
+
+        # The result is returned to the server (Loss, examples, Metrics)
+        # Here the loss is typically 0, since in RL we care about mean_reward as metric
+        return 0.0,TEST_EPISODES,{"mean_reward": mean_reward}
+
 
 # --- STEP 5: FINAL PROGRAM ---
 if __name__ == "__main__":
@@ -328,13 +379,25 @@ if __name__ == "__main__":
     
     # This blocks until training rounds are done
     fl.client.start_numpy_client(
-        server_address="127.0.0.1:8090", 
+        server_address="127.0.0.1:8090", # NOTE: If using Docker containers for agents, change '127.0.0.1' to 'host.docker.internal' or the server container name
         client=client_object
     )
     
     # --- Phase 2: "CLOSED LOOP" (LIVE MODE) ---
     print("\n" + "="*50)
     print(f"--- [CLIENT {client_id}] Phase 2: Federation is over! ---")
+
+    # Save the model's final state
+    try:
+        if not os.path.exists("saved_models"):
+            os.makedirs("saved_models")
+
+        model_path = f"saved_models/waf_model_client_{client_id}"
+        client_object.model.save(model_path)
+        print(f"[SYSTEM] SUCCESS: Federated Model saved to '{model_path}.zip'")
+    except Exception as e:
+        print(f"[ERROR] Could not save the model: {e}")
+
     print(f"--- Starting 'CLOSED LOOP' (LIVE MODE) ---")
     print(f"--- I use the final 'Federated Brain' ---")
     print("="*50 + "\n")
