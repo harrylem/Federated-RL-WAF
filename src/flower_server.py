@@ -3,6 +3,9 @@ import numpy as np
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+import subprocess
+import threading
+import time
 from typing import List, Tuple, Dict, Optional
 from flwr.common import Metrics
 
@@ -20,6 +23,7 @@ SAVE_DIR = os.path.join(SCRIPT_DIR, "saved_models")
 # We search for the dataset where the dataset_client.py sets it ( At dataset/csic_database.csv )
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR) # We go one level up to 'src' parent
 DATASET_PATH = os.path.join(PROJECT_ROOT, 'datasets', 'csic_database.csv')
+ATTACKER_SCRIPT = os.path.join(SCRIPT_DIR, "attacker.py")
 # Ensure the directory exists, if not create it.
 if not os.path.exists(DATASET_PATH):
     DATASET_PATH = os.path.join(SCRIPT_DIR, "dataset.csv")
@@ -159,6 +163,34 @@ def pretrain_with_dataset():
     except Exception as e:
         print(f"   ❌ Failed to save model: {e}")
 
+def run_attack_sim():
+    """
+    Waits until all agents are connected and then luanches the attack to the Honeypot to force the system to learn (Learning from Scratch) 
+    """
+    print("\n[AUTO-ATTACK] Launching 'attacker.py' against Honeypot (Agent 2)...")
+    print("   -> Generating 2500 attacks to trigger PPO Update...")
+    
+    # We run attacker.py automaticaly
+    # We target Port 8080 (Honeypot) because this Agent reads Logs!
+    try:
+        # We need to pass inputs to the script (2 = Honeypot, 2500 = Attacks)
+        process = subprocess.Popen(
+            ['python3', ATTACKER_SCRIPT],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        # We preset the options: '2' (Honeypot) και '2500' (Attacks)
+        stdout, stderr = process.communicate(input="2\n2500\n")
+        
+        if process.returncode == 0:
+            print("[AUTO-ATTACK] Attack Simulation Completed successfully!")
+        else:
+            print(f"[AUTO-ATTACK] Script finished with errors:\n{stderr}")
+            
+    except Exception as e:
+        print(f"❌ [AUTO-ATTACK] Failed to run attacker: {e}")
         # -- Main menu --
 def main_menu():
         while True:
@@ -166,18 +198,24 @@ def main_menu():
             print(" FEDERATED WAF - HYBRID LEARNING CONTROL CENTER ")
             print("="*60)
             print("1.Start Federated Server (Live Mode)")
-            print("2.Pre-train with Dataset (Offline Mode - CSIC 2010)")
+            print("   -> Use this if you have Pre-trained or want manual testing.")
+            print("2.Start Server + AUTO-ATTACK Simulation")
+            print("   -> Automates 'Learning from Scratch'. Attacks Honeypot automatically.")
+            print("3.Pre-train with Dataset (Warm Start)")
             print(f"Looks for file at: {DATASET_PATH}")
-            print("3.Exit...")
+            print("   -> Recommended for best performance.")
+            print("4.Exit...")
             
-            choice = input("\nSelect Option (1-3): ")
+            choice = input("\nSelect Option (1-4): ")
                 
             if choice == '1':
-                return
+                return False # False = No Auto-Attack
             elif choice == '2':
-                pretrain_with_dataset()
-                input("Press ENTER to return to menu...")
+                return True  # True = Run Auto-Attack
             elif choice == '3':
+                pretrain_with_dataset()
+                input("Press ENTER to return...")
+            elif choice == '4':
                 exit()
             else:
                 print("Invalid selection!!")
@@ -284,9 +322,18 @@ def load_initial_parameters(): # Checks if a saved model exists on the disk (Dyn
         
 if __name__ == "__main__":
     print("[Server] Beginning Federated RL Server...")
-    # UI menu
-    main_menu()
-
+    # UI menu - Returns true if the user selects the attacker.py script to run
+    auto_attack = main_menu()
+    # If Auto-Attack is selected , the Thread begins
+    if auto_attack:
+        # Check if there is a script
+        if os.path.exists(ATTACKER_SCRIPT):
+            attack_thread = threading.Thread(target=run_attack_sim, daemon = True)
+            attack_thread.start()
+        else:
+            print(f"Error: Could not find {ATTACKER_SCRIPT}. Running without attacks.")
+        
+    
     # Load previous model if exists
     print("[Server] Initializing Federated Environment...")
     initial_params = load_initial_parameters()

@@ -26,4 +26,4 @@ saved_models/
 .idea/
 *.venv
 
-honeypot_config/default.conf.bak
+

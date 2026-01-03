@@ -208,9 +208,9 @@ def live_log_parser(container_name, model):
 class FlowerRLClient(fl.client.NumPyClient):
     def __init__(self, client_id):
         self.client_id = client_id
-        self.log_cursors = {} # Keep track of file reading positions
-        # Load previous cursor state if exists
-        self.load_cursor_state()
+        # Timestamp to know when to read logs (to not read the old)
+        self.last_log_check = int(time.time())
+
         if self.client_id == "1":
             print("[Client 1] I am the WAF AGENT (False Positives). Loading WAF logs.")
             db = FAKE_LOG_DB_WAF
@@ -224,26 +224,6 @@ class FlowerRLClient(fl.client.NumPyClient):
         self.env = WafEnv(db_source=db)
         self.model = PPO("MlpPolicy", self.env, verbose=0) # Every client has its own PPO model
     
-    def load_cursor_state(self):
-        # Load the cursor positions from a file if it exists
-        if os.path.exists(CURSOR_STATE_FILE):
-            try:
-                with open(CURSOR_STATE_FILE, 'r') as f:
-                    self.log_cursors = json.load(f)
-                print(f"[SYSTEM] Loaded log reading state from {CURSOR_STATE_FILE}")
-            except Exception:
-                print("[WARN] Corrupted state file. Starting fresh.")
-                self.log_cursors = {}
-        else:
-            self.log_cursors = {}
-    def save_cursor_state(self):
-       # Save the current cursor positions to a file
-        try:
-            with open(CURSOR_STATE_FILE, 'w') as f:
-                json.dump(self.log_cursors, f)
-        except Exception as e:
-            print(f"[WARN] Could not save cursor state: {e}")
-
     def get_parameters(self, config):
         print(f"[Client {self.client_id}] Providing my brain parameters...")
         return [param.detach().cpu().numpy() for param in self.model.policy.parameters()]
@@ -255,57 +235,32 @@ class FlowerRLClient(fl.client.NumPyClient):
         self.model.policy.load_state_dict(state_dict, strict=True)
 
     def load_honeypot_logs(self):
-        # Dynamic path resolution relative to this script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(script_dir) # Adjust if your folder structure differs
-        configs_root = os.path.join(project_root, "honeynet_configs")
-        
-        log_files_to_scan = []
-        if os.path.exists(configs_root):
-            for root, dirs, files in os.walk(configs_root):
-                if "error.log" in files:
-                    log_files_to_scan.append(os.path.join(root, "error.log"))
-        
+        # It now reads the logs directly from Docker Container (waf_honeypot).
         total_new_attacks = 0
+        
+        try:
+            container = client.containers.get(HONEYPOT_CONTAINER_NAME)
+            
+            # We need only the logs that occured most recently!!
+            logs = container.logs(since=self.last_log_check).decode('utf-8', errors='ignore')
+            
+            # We renew the timer for next time
+            self.last_log_check = int(time.time())
 
-        for log_path in log_files_to_scan:
-            try:
-                folder_name = os.path.basename(os.path.dirname(log_path)).upper()
-            except:
-                folder_name = "UNKNOWN"
-            
-            # Initialize cursor if new file
-            if log_path not in self.log_cursors:
-                self.log_cursors[log_path] = 0
-            
-            # Read logs
-            if os.path.exists(log_path):
-                current_file_size = os.path.getsize(log_path)
-                saved_cursor = self.log_cursors.get(log_path, 0)
-                # Handle log rotation - Ιf file size is smaller than saved cursor, reset cursor
-                if current_file_size < saved_cursor:
-                    print(f"[INFO] Log rotation detected for {folder_name}. Resetting cursor.")
-                    saved_cursor = 0
-                try:
-                    with open(log_path, 'r') as f:
-                        f.seek(self.log_cursors[log_path])
-                        new_lines = f.readlines()
-                        # Update cursor position
-                        self.log_cursors[log_path] = f.tell()
+            if not logs: return 0
 
-                        attacks_in_file = 0
-                        for line in new_lines:
-                            # Simple heuristic for ModSecurity blocks
-                            if "ModSecurity" in line and "Access denied" in line:
-                                attacks_in_file += 1
-                        
-                        if attacks_in_file > 0:
-                            print(f"[ALERT] Found {attacks_in_file} new attacks in: {folder_name}")
-                            total_new_attacks += attacks_in_file
+            # We count the attacks
+            for line in logs.split('\n'):
+                # We detect ModSecurity blocks or 403 Errors
+                if ("ModSecurity" in line and "Access denied" in line) or ("403 Forbidden" in line):
+                    total_new_attacks += 1
             
-                except Exception as e:
-                    print(f"[ERROR] Could not read {folder_name}: {e}")              
-        self.save_cursor_state()          
+            if total_new_attacks > 0:
+                print(f"[ALERT] FOUND {total_new_attacks} NEW ATTACKS IN DOCKER LOGS!")
+                
+        except Exception as e:
+            print(f"[ERROR] Could not read Docker logs: {e}")
+            
         return total_new_attacks
 
     def fit(self, parameters, config):
@@ -320,20 +275,28 @@ class FlowerRLClient(fl.client.NumPyClient):
             new_attacks = self.load_honeypot_logs()
             
             if new_attacks > 0:
+                # If new attacks are found, we up the training intensity
                 boost = new_attacks * 2000
                 training_steps += boost
+                print(f"   -> Injecting Critical Knowledge (UNION, SELECT, ALERT) into Brain.")
+                # Synthetic Injection: We ensure that the agent will learn the patterns now that an attack takes place
+                critical_attack_log = {
+                    'uri': '/zero_day_attack?id=1 UNION SELECT password FROM users <script>alert(1)</script>', 
+                    'source': 'HONEYPOT', 
+                    'messages': ['ModSecurity: Access denied', 'SQL Injection', 'XSS Attack']
+                }
+                for _ in range(50): # We repeat 50 times for emphasis
+                    self.env.FAKE_LOG_DB.append(critical_attack_log)
+
                 print(f"Training will be intensified due to {new_attacks} new attacks! (Total Steps: {training_steps})")
             else:
                 # No new attacks, keep standard training
                 training_steps = 1000
-
         # Update local model with global parameters
         self.set_parameters(parameters)
-        
         # Train
         self.model.learn(total_timesteps=training_steps)
         print(f"[Client {self.client_id}] Training finished.")
-        
         return self.get_parameters(config={}), self.env.max_steps, {}
 
     def evaluate(self, parameters, config):
