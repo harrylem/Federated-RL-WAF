@@ -47,6 +47,7 @@ services:
         - ./honeynet_configs/admin_logs:/var/log/nginx
       environment:
         - MODSEC_AUDIT_ENGINE=On
+        #- MODSEC_RULE_ENGINE=DetectionOnly # Use this for Detection Only mode
       networks:
         - waf_network
 
@@ -60,6 +61,7 @@ services:
         - ./honeynet_configs/api_logs:/var/log/nginx
       environment:
         - MODSEC_AUDIT_ENGINE=On
+        #- MODSEC_RULE_ENGINE=DetectionOnly # Use this for Detection Only mode
       networks:
         - waf_network
 networks:

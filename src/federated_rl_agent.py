@@ -35,8 +35,21 @@ except Exception as e:
     sys.exit(1)
 
 # The vectorizer 
-vectorizer = TfidfVectorizer(max_features=9) 
-vectorizer.fit(["/wp-admin.php", "/vulnerabilities/sqli", "/healthz", "SELECT", "FROM", "script"])
+vectorizer = TfidfVectorizer(max_features=50) 
+vectorizer.fit([
+    # ModSecurity Keywords
+    "SQL Injection", "XSS", "Cross-site Scripting", "Remote Command Execution",
+    "Scanner", "Crawler", "Bot", "Denied", "Access denied", "Forbidden",
+    "PHP Injection", "Anomaly", "Score Exceeded", "Inbound Anomaly",
+    # Attack Payloads
+    "SELECT", "UNION", "AND", "OR", "1=1", "ALERT", "SCRIPT", "IFRAME",
+    "etc/passwd", "cmd.exe", "bin/sh", "wget", "curl",
+    # Common URI parts
+    "/", "index", "php", "html", "login", "admin", "dashboard",
+    "/wp-admin", "/vulnerabilities", "id", "search", "query",
+    # User Agents & Headers
+    "Mozilla", "Chrome", "Safari", "Gecko", "Postman", "Python"
+])
 
 # Mock small scale databases for trial purposes
 FAKE_LOG_DB_WAF = [
@@ -54,8 +67,8 @@ FAKE_LOG_DB_HONEYPOT = [
 class WafEnv(gym.Env):
     def __init__(self, db_source): 
         super(WafEnv, self).__init__()
-        self.action_space = spaces.Discrete(3) # 0: Pass, 1: Block URI, 2: Block IP
-        self.observation_space = spaces.Box(low=0, high=1, shape=(9,), dtype=np.float32)
+        self.action_space = spaces.Discrete(2) # 1: Allow, 2: Block 
+        self.observation_space = spaces.Box(low=0, high=1, shape=(50,), dtype=np.float32)
         self.FAKE_LOG_DB = db_source
         self.max_steps = 1000
         self.current_step = 0
@@ -68,7 +81,19 @@ class WafEnv(gym.Env):
             # Fake log from FAKE_LOG_DB (Training)
             uri = log_data.get('uri', '/') 
 
-        vector = vectorizer.transform([uri]).toarray().flatten()
+       # We access Modsecurity messages if any
+        modsec_alerts = ""
+        if 'transaction' in log_data and 'messages' in log_data['transaction']:
+            for msg in log_data['transaction']['messages']:
+                # We combinee WAF messages (e.g. "SQL Injection detected...")
+                modsec_alerts += " " + msg['message']
+        
+        # Combination of URI and ModSecurity alerts
+        # e.g. : "/vulnerabilities/sqli SQL Injection Attack Detected"
+        combined_input = uri + " " + modsec_alerts
+        
+        # Transform to numeric vector
+        vector = vectorizer.transform([combined_input]).toarray().flatten()
         return vector
 
     def _get_reward(self, log_data, action):
@@ -76,9 +101,9 @@ class WafEnv(gym.Env):
         source = log_data.get('source', 'WAF') 
 
         # Reward Logic
-        if uri == "/healthz" and (action == 1 or action == 2): return -100
+        if uri == "/healthz" and (action == 1): return -100
         if source == 'HONEYPOT':
-            if action == 1 or action == 2: return 100
+            if action == 1: return 100
             if action == 0: return -50
         if source == 'WAF' and log_data.get('messages'): # Attack detected by WAF signature
             if action == 1 or action == 2: return 10
@@ -103,9 +128,8 @@ class WafEnv(gym.Env):
 # --- STEP 3: THE "LIVE" AGENT LOGIC ---
 
 def apply_rule_to_waf(action, log_data):
-    """
-    Applies the decision to the 'waf_instance1' container.
-    """
+
+    #Applies the decision to the 'waf_instance1' container.
     global rule_id_counter
     
     # Safety check
@@ -120,19 +144,18 @@ def apply_rule_to_waf(action, log_data):
 
     rule_string = ""
 
-    if action == 1 and uri_to_block not in blocked_uris:
-        print(f"  [LIVE ACTION] DECISION: URI BLOCKED: {uri_to_block}")
-        rule_string = f'SecRule REQUEST_URI "@streq {uri_to_block}" "id:{rule_id_counter},phase:1,deny,status:403,msg:\'Blocked by Federated RL Agent (URI)\'"'
-        blocked_uris.add(uri_to_block)
-            
-    elif action == 2 and ip_to_block not in blocked_ips:
-        print(f"  [LIVE ACTION] DECISION: IP BLOCKED: {ip_to_block}")
-        rule_string = f'SecRule REMOTE_ADDR "@streq {ip_to_block}" "id:{rule_id_counter},phase:1,deny,status:403,msg:\'Blocked by Federated RL Agent (IP)\'"'
-        blocked_ips.add(ip_to_block)
-    
-    else: # Action == 0 (Do Nothing)
+    if action == 1:
+        # We check if IP is already blocked
+        if ip_to_block not in blocked_ips:
+            print(f"  [LIVE ACTION] DECISION: BLOCKING ATTACKER IP: {ip_to_block}")
+            rule_string = f'SecRule REMOTE_ADDR "@streq {ip_to_block}" "id:{rule_id_counter},phase:1,deny,status:403,msg:\'Blocked by Federated RL Agent (IP)\'"'
+            blocked_ips.add(ip_to_block)
+        else:
+            print(f"  [LIVE ACTION] IP {ip_to_block} is already blocked.")
+            return
+    else: # Action == 0
         print(f"  [LIVE ACTION] DECISION: IGNORED.")
-        return 
+        return
 
     # Write rule to container
     try:
@@ -145,9 +168,8 @@ def apply_rule_to_waf(action, log_data):
         print(f"  [ERROR] FAILED TO APPLY THE RULE: {e}")
 
 def live_log_parser(container_name, model):
-    """
-    Read the logs and use the Federated "Brain" to make decisions
-    """
+    
+    #Read the logs and use the Federated "Brain" to make decisions
     print(f"[Live Listener] Connecting (Live) to: {container_name}")
     try:
         container = client.containers.get(container_name)
@@ -165,7 +187,10 @@ def live_log_parser(container_name, model):
                     # 1. Transform log to observation vector
                     # Note: We instantiate a temporary Env just to use the helper method _get_observation
                     observation = WafEnv(db_source=[])._get_observation(json_data) 
-                    
+                    if np.sum(observation) == 0:
+                        print(f"  [BLIND] The Agent didn't recognize any keywords in the URL!")
+                    else:
+                        print(f"[SEEING] Vector Strength: {np.sum(observation):.2f}")
                     # 2. "Asking" the federated "brain" for advice
                     action, _states = model.predict(observation, deterministic=True)
                     
@@ -183,9 +208,9 @@ def live_log_parser(container_name, model):
 class FlowerRLClient(fl.client.NumPyClient):
     def __init__(self, client_id):
         self.client_id = client_id
-        self.log_cursors = {} # Keep track of file reading positions
-        # Load previous cursor state if exists
-        self.load_cursor_state()
+        # Timestamp to know when to read logs (to not read the old)
+        self.last_log_check = int(time.time())
+
         if self.client_id == "1":
             print("[Client 1] I am the WAF AGENT (False Positives). Loading WAF logs.")
             db = FAKE_LOG_DB_WAF
@@ -199,26 +224,6 @@ class FlowerRLClient(fl.client.NumPyClient):
         self.env = WafEnv(db_source=db)
         self.model = PPO("MlpPolicy", self.env, verbose=0) # Every client has its own PPO model
     
-    def load_cursor_state(self):
-        # Load the cursor positions from a file if it exists
-        if os.path.exists(CURSOR_STATE_FILE):
-            try:
-                with open(CURSOR_STATE_FILE, 'r') as f:
-                    self.log_cursors = json.load(f)
-                print(f"[SYSTEM] Loaded log reading state from {CURSOR_STATE_FILE}")
-            except Exception:
-                print("[WARN] Corrupted state file. Starting fresh.")
-                self.log_cursors = {}
-        else:
-            self.log_cursors = {}
-    def save_cursor_state(self):
-       # Save the current cursor positions to a file
-        try:
-            with open(CURSOR_STATE_FILE, 'w') as f:
-                json.dump(self.log_cursors, f)
-        except Exception as e:
-            print(f"[WARN] Could not save cursor state: {e}")
-
     def get_parameters(self, config):
         print(f"[Client {self.client_id}] Providing my brain parameters...")
         return [param.detach().cpu().numpy() for param in self.model.policy.parameters()]
@@ -230,57 +235,32 @@ class FlowerRLClient(fl.client.NumPyClient):
         self.model.policy.load_state_dict(state_dict, strict=True)
 
     def load_honeypot_logs(self):
-        # Dynamic path resolution relative to this script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(script_dir) # Adjust if your folder structure differs
-        configs_root = os.path.join(project_root, "honeynet_configs")
-        
-        log_files_to_scan = []
-        if os.path.exists(configs_root):
-            for root, dirs, files in os.walk(configs_root):
-                if "error.log" in files:
-                    log_files_to_scan.append(os.path.join(root, "error.log"))
-        
+        # It now reads the logs directly from Docker Container (waf_honeypot).
         total_new_attacks = 0
+        
+        try:
+            container = client.containers.get(HONEYPOT_CONTAINER_NAME)
+            
+            # We need only the logs that occured most recently!!
+            logs = container.logs(since=self.last_log_check).decode('utf-8', errors='ignore')
+            
+            # We renew the timer for next time
+            self.last_log_check = int(time.time())
 
-        for log_path in log_files_to_scan:
-            try:
-                folder_name = os.path.basename(os.path.dirname(log_path)).upper()
-            except:
-                folder_name = "UNKNOWN"
-            
-            # Initialize cursor if new file
-            if log_path not in self.log_cursors:
-                self.log_cursors[log_path] = 0
-            
-            # Read logs
-            if os.path.exists(log_path):
-                current_file_size = os.path.getsize(log_path)
-                saved_cursor = self.log_cursors.get(log_path, 0)
-                # Handle log rotation - Ιf file size is smaller than saved cursor, reset cursor
-                if current_file_size < saved_cursor:
-                    print(f"[INFO] Log rotation detected for {folder_name}. Resetting cursor.")
-                    saved_cursor = 0
-                try:
-                    with open(log_path, 'r') as f:
-                        f.seek(self.log_cursors[log_path])
-                        new_lines = f.readlines()
-                        # Update cursor position
-                        self.log_cursors[log_path] = f.tell()
+            if not logs: return 0
 
-                        attacks_in_file = 0
-                        for line in new_lines:
-                            # Simple heuristic for ModSecurity blocks
-                            if "ModSecurity" in line and "Access denied" in line:
-                                attacks_in_file += 1
-                        
-                        if attacks_in_file > 0:
-                            print(f"[ALERT] Found {attacks_in_file} new attacks in: {folder_name}")
-                            total_new_attacks += attacks_in_file
+            # We count the attacks
+            for line in logs.split('\n'):
+                # We detect ModSecurity blocks or 403 Errors
+                if ("ModSecurity" in line and "Access denied" in line) or ("403 Forbidden" in line):
+                    total_new_attacks += 1
             
-                except Exception as e:
-                    print(f"[ERROR] Could not read {folder_name}: {e}")              
-        self.save_cursor_state()          
+            if total_new_attacks > 0:
+                print(f"[ALERT] FOUND {total_new_attacks} NEW ATTACKS IN DOCKER LOGS!")
+                
+        except Exception as e:
+            print(f"[ERROR] Could not read Docker logs: {e}")
+            
         return total_new_attacks
 
     def fit(self, parameters, config):
@@ -295,24 +275,58 @@ class FlowerRLClient(fl.client.NumPyClient):
             new_attacks = self.load_honeypot_logs()
             
             if new_attacks > 0:
+                # If new attacks are found, we up the training intensity
                 boost = new_attacks * 2000
                 training_steps += boost
+                print(f"   -> Injecting Critical Knowledge (UNION, SELECT, ALERT) into Brain.")
+                # Synthetic Injection: We ensure that the agent will learn the patterns now that an attack takes place
+                critical_attack_log = {
+                    'uri': '/zero_day_attack?id=1 UNION SELECT password FROM users <script>alert(1)</script>', 
+                    'source': 'HONEYPOT', 
+                    'messages': ['ModSecurity: Access denied', 'SQL Injection', 'XSS Attack']
+                }
+                for _ in range(50): # We repeat 50 times for emphasis
+                    self.env.FAKE_LOG_DB.append(critical_attack_log)
+
                 print(f"Training will be intensified due to {new_attacks} new attacks! (Total Steps: {training_steps})")
             else:
                 # No new attacks, keep standard training
                 training_steps = 1000
-
         # Update local model with global parameters
         self.set_parameters(parameters)
-        
         # Train
         self.model.learn(total_timesteps=training_steps)
         print(f"[Client {self.client_id}] Training finished.")
-        
         return self.get_parameters(config={}), self.env.max_steps, {}
 
     def evaluate(self, parameters, config):
-        return 0.0, 1, {}
+        # Update the local model with the new global weights received from the Server
+        self.set_parameters(parameters)
+        # We run a small test to track performance. We run 5 episodes to get a stable average score.
+        total_rewards = []
+        TEST_EPISODES = 5
+        # We use a temporary evaluation loop
+        for _ in range(5):
+            obs, _ = self.env.reset()
+            done = False
+            episode_reward = 0
+            while not done:
+                # Deterministic = True for strict action selection
+                action, _ = self.model.predict(obs, deterministic=True)
+                # Execute the action in the simulated environment
+                obs, reward, done, _, _ = self.env.step(action)
+                episode_reward += reward
+
+            total_rewards.append(episode_reward)
+        #Calculate the Mean Reward (The score of the exam)
+        mean_reward = float(sum(total_rewards) / len(total_rewards))
+
+        print(f"[Client {self.client_id}] Evaluation Mean reward: {mean_reward:.2f}")
+
+        # The result is returned to the server (Loss, examples, Metrics)
+        # Here the loss is typically 0, since in RL we care about mean_reward as metric
+        return 0.0,TEST_EPISODES,{"mean_reward": mean_reward}
+
 
 # --- STEP 5: FINAL PROGRAM ---
 if __name__ == "__main__":
@@ -328,13 +342,25 @@ if __name__ == "__main__":
     
     # This blocks until training rounds are done
     fl.client.start_numpy_client(
-        server_address="127.0.0.1:8090", 
+        server_address="127.0.0.1:8090", # NOTE: If using Docker containers for agents, change '127.0.0.1' to 'host.docker.internal' or the server container name
         client=client_object
     )
     
     # --- Phase 2: "CLOSED LOOP" (LIVE MODE) ---
     print("\n" + "="*50)
     print(f"--- [CLIENT {client_id}] Phase 2: Federation is over! ---")
+
+    # Save the model's final state
+    try:
+        if not os.path.exists("saved_models"):
+            os.makedirs("saved_models")
+
+        model_path = f"saved_models/waf_model_client_{client_id}"
+        client_object.model.save(model_path)
+        print(f"[SYSTEM] SUCCESS: Federated Model saved to '{model_path}.zip'")
+    except Exception as e:
+        print(f"[ERROR] Could not save the model: {e}")
+
     print(f"--- Starting 'CLOSED LOOP' (LIVE MODE) ---")
     print(f"--- I use the final 'Federated Brain' ---")
     print("="*50 + "\n")
