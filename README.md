@@ -76,8 +76,8 @@ We compared the standard **Proximal Policy Optimization (PPO)** against a **Recu
     <th width="50%">❌ Recurrent PPO/LSTM (Failure)</th>
   </tr>
   <tr>
-    <td><img src="./Federated-RL-WAF/screenshots/training_progress_PPO" alt="PPO Training Graph" width="100%"></td>
-    <td><img src="./Federated-RL-WAF/screenshots/training_progress_PPO_Reccurent" alt="LSTM Training Graph" width="100%"></td>
+    <td><img src="/screenshots/training_progress_PPO.png" alt="PPO Training Graph" width="100%"></td>
+    <td><img src="/screenshots/training_progress_PPO_Reccurent.png" alt="LSTM Training Graph" width="100%"></td>
   </tr>
   <tr>
     <td align="center"><i>Fast convergence and high positive rewards (~27k).</i></td>
@@ -99,8 +99,8 @@ We compared training from scratch versus using our **Hybrid Learning** approach.
     <th width="50%"> Learning with pretraining</th>
   </tr>
   <tr>
-    <td><img src="./Federated-RL-WAF/screenshots/training_progress_without_pretraining_PPO" alt="PPO Training Graph" width="100%"></td>
-    <td><img src="./Federated-RL-WAF/screenshots/training_progress_with_pretraining_PPO" alt="LSTM Training Graph" width="100%"></td>
+    <td><img src="/screenshots/training_progress_without_pretraining_PPO.png" alt="PPO Training Graph" width="100%"></td>
+    <td><img src="/screenshots/training_progress_with_pretraining_PPO.png" alt="LSTM Training Graph" width="100%"></td>
   </tr>
   <tr>
     <td align="center"><i>Fast convergence and high positive rewards (~27k).</i></td>
