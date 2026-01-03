@@ -41,7 +41,7 @@ The system is fully containerized using **Docker Compose**:
 To prevent the agent from starting "blind" (Cold Start), the Server offers a **Pre-training Menu**. It trains the model on 61,000+ samples from the CSIC 2010 dataset.
 * *Innovation:* The system uses **Synthetic Injection** to append ModSecurity keywords to the offline dataset, ensuring the agent recognizes attack patterns immediately in Live Mode.
 
-### 🔌 Direct Docker API Integration (v1.4)
+### Direct Docker API Integration (v1.4)
 Instead of relying on fragile file-based logging (`error.log`), the Agents now connect directly to the **Docker Daemon**.
 * **Benefit:** 100% reliable log reading, zero latency, and immune to Windows/Linux permission conflicts.
 
@@ -63,15 +63,53 @@ The logic has been expanded beyond simple log parsing. The system now includes:
 * **JSON Log Parsing:** The log processing pipeline has been upgraded to handle **JSON files**. This ensures robust parsing of request headers, bodies, and attack signatures.
 * **Updated Agent Logic (`federated_rl_agent.py`):** The agent code has been refactored to consume the new JSON format, enabling more accurate state representation for the Reinforcement Learning model.
 
-## Proof of Concept
-### 1. Real-Time Defense (Closed Loop)
-The Agent detects a Zero-Day attack on the Honeypot and patches the Real WAF instantly.
-![Attack Blocked](screenshots/Client2_Live_Training.jpg)
-### 2. Training Performance
-Training Performance (Oscillating Rewards)
-The graph demonstrates the Agent's ability to maintain high rewards over 50 rounds, balancing between blocking thousands of attacks (Honeypot) and allowing normal traffic (WAF).
-The Reinforcement Learning agent maximizing reward over time (Learning to distinguish attacks vs normal traffic).
-![Trainig Progress](screenshots/Training_Progress.jpg)
+## 🔬 Comparative Experiments & Results
+As part of my Thesis validation, extensive experiments were conducted to evaluate different architectures and learning strategies.
+
+### Experiment A: Architecture (PPO vs LSTM)
+We compared the standard **Proximal Policy Optimization (PPO)** against a **Recurrent PPO (LSTM)** architecture to test if "memory" improves detection.
+* **Findings:** The **Standard PPO** consistently outperformed LSTM for this Real-Time WAF scenario. The LSTM model struggled to converge (Negative Rewards) due to the atomic nature of web attacks, where "context" is less critical than immediate pattern recognition and needed a lot more training to match PPO's perfomance on this data.
+
+<table width="100%">
+  <tr>
+    <th width="50%">✅ Standard PPO (Success)</th>
+    <th width="50%">❌ Recurrent PPO/LSTM (Failure)</th>
+  </tr>
+  <tr>
+    <td><img src="Federated-RL-WAF/screenshots/training_progress_PPO.png" alt="PPO Training Graph" width="100%"></td>
+    <td><img src="Federated-RL-WAF/screenshots/training_progress_PPO_Recurrent.png" alt="LSTM Training Graph" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><i>Fast convergence and high positive rewards (~27k).</i></td>
+    <td align="center"><i>Failure to converge, stuck at negative rewards.</i></td>
+  </tr>
+</table>
+<br>
+
+* **Decision:** The final system uses **Standard PPO (MlpPolicy)** for maximum stability and speed.
+
+### Experiment B: Solving "Cold Start" (Scratch vs Hybrid)
+We compared training from scratch versus using our **Hybrid Learning** approach.
+* **Without Pre-training:** The agents required **~32 Rounds** to start effectively blocking attacks (Blind Phase).
+* **With Pre-training:** The agents reached optimal performance by **Round 19**.
+
+<table width="100%">
+  <tr>
+    <th width="50%"> Learning without pretraining</th>
+    <th width="50%"> Learning with pretraining</th>
+  </tr>
+  <tr>
+    <td><img src="Federated-RL-WAF/screenshots/training_progress_without_pretraining_PPO.png" alt="PPO Training Graph" width="100%"></td>
+    <td><img src="Federated-RL-WAF/screenshots/training_progress_with_pretraining_PPO.png" alt="LSTM Training Graph" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><i>Fast convergence and high positive rewards (~27k).</i></td>
+    <td align="center"><i>Failure to converge, stuck at negative rewards.</i></td>
+  </tr>
+</table>
+<br>
+
+* **Result:** Hybrid Learning reduced the vulnerability window by **~40%**, offering a production-ready defense much faster.
 
 ## 🛠 How to Run
 
@@ -85,9 +123,9 @@ The Reinforcement Learning agent maximizing reward over time (Learning to distin
 docker-compose up -d```
 ```
 2. Install Dependencies
-# Using uv (faster)
+### Using uv (faster)
 uv pip install -r requirements.txt
-# OR using pip
+### OR using pip
 pip install -r requirements.txt
 
 3. Run the Federated System
@@ -97,9 +135,9 @@ Terminal 1 (Server):
 ```bash
 python3 src/flower_server.py
 ```
-You will be presented with the following interactive menu:
+### You will be presented with the following interactive menu:
 ============================================================
-   🛡️  FEDERATED WAF - CONTROL CENTER v1.4  🛡️
+  # 🛡️  FEDERATED WAF - CONTROL CENTER v1.4  🛡️
 ============================================================
 1. Start Server (Standard Mode)
    -> Use this if you have Pre-trained or want manual testing.
